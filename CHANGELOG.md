@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.4 — Live Lock
+
+- Raises the live-data polling and presentation cadence from 900 ms to 33 ms
+  (approximately 30.3 Hz) using a precise Qt timer.
+- Keeps the expensive 18-second DSP analysis asynchronous and prevents
+  overlapping workers when processing takes longer than one live frame.
+- Adds explicit searching, locked, degraded and lost measurement states.
+- Preserves the last locked measurement across brief invalid analysis windows
+  instead of forcing confidence and all metrics immediately to zero.
+- Decays confidence over a three-second grace period before releasing lock.
+- Makes history and confidence smoothing time-based so their behavior remains
+  stable when analysis throughput changes.
+- Requires large rate changes to remain coherent over time before acceptance.
+- Prevents exporting or recording a positional result while the lock is
+  degraded.
+- Adds regression tests for transient invalid windows, sustained signal loss
+  and the state transitions.
+- Adds an automated version, translation and 30 Hz configuration consistency
+  check.
+
 ## 0.3.3 — Quiet Confidence and Amplitude
 
 - Calculates diagnostic SNR in the escapement pulse band instead of allowing

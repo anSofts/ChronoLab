@@ -40,6 +40,7 @@ private slots:
     void onDevicesChanged(const QStringList& devices);
     void onSamples(const QVector<float>& samples, int sampleRate);
     void updateLevel(float peak, float rms);
+    void pollLiveData();
     void analyzeBuffer();
     void finishAnalysis();
     void openWav();
@@ -98,9 +99,8 @@ private:
     QProgressBar* m_levelMeter = nullptr;
     SignalPlotWidget* m_signalPlot = nullptr;
     TimegrapherPlotWidget* m_timegrapherPlot = nullptr;
-    QTimer* m_analysisTimer = nullptr;
+    QTimer* m_liveDataTimer = nullptr;
     QFutureWatcher<AnalysisJobResult>* m_analysisWatcher = nullptr;
-    bool m_analysisPending = false;
     quint64 m_analysisGeneration = 0;
     std::array<std::optional<AnalysisResult>, 6> m_positionResults;
 };

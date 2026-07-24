@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <limits>
@@ -1026,6 +1027,7 @@ AnalysisResult TimegrapherAnalyzer::analyze(
         + 0.05 * jitterFactor);
 
     result.valid = true;
+    result.state = MeasurementState::Locked;
     result.status = result.confidence >= 65.0
         ? "Misurazione stabile"
         : "Misurazione acquisita, qualità da migliorare";
@@ -1035,16 +1037,65 @@ AnalysisResult TimegrapherAnalyzer::analyze(
 AnalysisResult MeasurementStabilizer::process(
     const AnalysisResult& candidate)
 {
+    const double nowSeconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    return processAt(candidate, nowSeconds);
+}
+
+AnalysisResult MeasurementStabilizer::processAt(
+    const AnalysisResult& candidate,
+    double timestampSeconds)
+{
+    constexpr double kHistorySeconds = 4.5;
+    constexpr double kDegradedGraceSeconds = 3.0;
+    constexpr double kPendingConfirmationSeconds = 0.30;
+
     if (!candidate.valid) {
         m_pendingCount = 0;
-        return candidate;
+        if (m_hasLastOutput && m_hasLastValidTimestamp) {
+            const double elapsed = std::max(
+                0.0, timestampSeconds - m_lastValidTimestampSeconds);
+            if (elapsed < kDegradedGraceSeconds) {
+                AnalysisResult held = m_lastOutput;
+                held.valid = true;
+                held.state = MeasurementState::Degraded;
+                held.status = "Segnale temporaneamente instabile";
+                held.confidence = std::clamp(
+                    m_smoothedConfidence
+                        * (1.0 - elapsed / kDegradedGraceSeconds),
+                    0.0,
+                    100.0);
+                m_lastProcessTimestampSeconds = timestampSeconds;
+                m_hasLastProcessTimestamp = true;
+                return held;
+            }
+        }
+
+        AnalysisResult lost = candidate;
+        lost.state = m_hasLastOutput
+            ? MeasurementState::Lost
+            : MeasurementState::Searching;
+        m_history.clear();
+        m_historyTimestamps.clear();
+        m_hasLastValidTimestamp = false;
+        m_lastProcessTimestampSeconds = timestampSeconds;
+        m_hasLastProcessTimestamp = true;
+        return lost;
     }
 
+    m_lastValidTimestampSeconds = timestampSeconds;
+    m_hasLastValidTimestamp = true;
+
     if (m_history.empty()) {
-        m_history.push_back(candidate);
+        AnalysisResult locked = candidate;
+        locked.state = MeasurementState::Locked;
+        m_history.push_back(locked);
+        m_historyTimestamps.push_back(timestampSeconds);
         m_smoothedConfidence = candidate.confidence;
-        m_lastOutput = candidate;
+        m_lastOutput = locked;
         m_hasLastOutput = true;
+        m_lastProcessTimestampSeconds = timestampSeconds;
+        m_hasLastProcessTimestamp = true;
         return m_lastOutput;
     }
 
@@ -1074,24 +1125,43 @@ AnalysisResult MeasurementStabilizer::process(
 
         if (continuesPendingCluster)
             ++m_pendingCount;
-        else
+        else {
             m_pendingCount = 1;
+            m_pendingSinceSeconds = timestampSeconds;
+        }
         m_pendingCandidate = candidate;
 
-        if (m_pendingCount < kRequiredConfirmations)
+        if (m_pendingCount < kRequiredConfirmations
+            || timestampSeconds - m_pendingSinceSeconds
+                < kPendingConfirmationSeconds) {
+            m_lastProcessTimestampSeconds = timestampSeconds;
+            m_hasLastProcessTimestamp = true;
             return m_hasLastOutput ? m_lastOutput : m_history.back();
+        }
 
         m_history.clear();
+        m_historyTimestamps.clear();
         m_pendingCount = 0;
     } else {
         m_pendingCount = 0;
     }
 
-    m_history.push_back(candidate);
-    if (m_history.size() > 5)
+    AnalysisResult lockedCandidate = candidate;
+    lockedCandidate.state = MeasurementState::Locked;
+    m_history.push_back(lockedCandidate);
+    m_historyTimestamps.push_back(timestampSeconds);
+    while (m_history.size() > 1
+           && m_historyTimestamps.front()
+               < timestampSeconds - kHistorySeconds) {
         m_history.erase(m_history.begin());
+        m_historyTimestamps.erase(m_historyTimestamps.begin());
+    }
+    if (m_history.size() > 128) {
+        m_history.erase(m_history.begin());
+        m_historyTimestamps.erase(m_historyTimestamps.begin());
+    }
 
-    AnalysisResult stabilized = candidate;
+    AnalysisResult stabilized = lockedCandidate;
     stabilized.rateSecondsPerDay =
         medianOfResults(m_history, &AnalysisResult::rateSecondsPerDay);
     stabilized.beatErrorMilliseconds =
@@ -1102,8 +1172,16 @@ AnalysisResult MeasurementStabilizer::process(
         medianOfResults(m_history, &AnalysisResult::intervalJitterMilliseconds);
     const double medianConfidence =
         medianOfResults(m_history, &AnalysisResult::confidence);
-    constexpr double kConfidenceSmoothing = 0.18;
-    m_smoothedConfidence += kConfidenceSmoothing
+    const double deltaSeconds = m_hasLastProcessTimestamp
+        ? std::clamp(
+              timestampSeconds - m_lastProcessTimestampSeconds,
+              0.0,
+              1.0)
+        : 0.0;
+    constexpr double kConfidenceTimeConstantSeconds = 3.5;
+    const double confidenceSmoothing =
+        1.0 - std::exp(-deltaSeconds / kConfidenceTimeConstantSeconds);
+    m_smoothedConfidence += confidenceSmoothing
         * (medianConfidence - m_smoothedConfidence);
     stabilized.confidence = m_smoothedConfidence;
 
@@ -1112,7 +1190,12 @@ AnalysisResult MeasurementStabilizer::process(
         if (result.amplitudeAvailable)
             amplitudeResults.push_back(result);
     }
-    if (amplitudeResults.size() >= std::min<std::size_t>(3, m_history.size())) {
+    const std::size_t requiredAmplitudeResults = std::min(
+        m_history.size(),
+        std::max<std::size_t>(
+            3,
+            (m_history.size() * 3 + 4) / 5));
+    if (amplitudeResults.size() >= requiredAmplitudeResults) {
         stabilized.amplitudeDegrees =
             medianOfResults(amplitudeResults, &AnalysisResult::amplitudeDegrees);
         stabilized.amplitudeAvailable = true;
@@ -1124,19 +1207,28 @@ AnalysisResult MeasurementStabilizer::process(
         stabilized.measuredBph = stabilized.nominalBph
             * (1.0 + stabilized.rateSecondsPerDay / kSecondsPerDay);
     }
+    stabilized.state = MeasurementState::Locked;
     m_lastOutput = stabilized;
     m_hasLastOutput = true;
+    m_lastProcessTimestampSeconds = timestampSeconds;
+    m_hasLastProcessTimestamp = true;
     return m_lastOutput;
 }
 
 void MeasurementStabilizer::reset()
 {
     m_history.clear();
+    m_historyTimestamps.clear();
     m_pendingCandidate = {};
     m_lastOutput = {};
     m_pendingCount = 0;
+    m_pendingSinceSeconds = 0.0;
+    m_lastValidTimestampSeconds = 0.0;
+    m_lastProcessTimestampSeconds = 0.0;
     m_smoothedConfidence = 0.0;
     m_hasLastOutput = false;
+    m_hasLastValidTimestamp = false;
+    m_hasLastProcessTimestamp = false;
 }
 
 } // namespace chronolab

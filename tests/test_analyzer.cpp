@@ -173,9 +173,10 @@ chronolab::AnalysisResult measurement(
 void testTransientRateOutlierIsRejected()
 {
     chronolab::MeasurementStabilizer stabilizer;
-    static_cast<void>(stabilizer.process(measurement(8.0, 0.8)));
-    static_cast<void>(stabilizer.process(measurement(7.6, 0.9)));
-    const auto result = stabilizer.process(measurement(-500.0, 0.0));
+    static_cast<void>(stabilizer.processAt(measurement(8.0, 0.8), 0.0));
+    static_cast<void>(stabilizer.processAt(measurement(7.6, 0.9), 0.5));
+    const auto result =
+        stabilizer.processAt(measurement(-500.0, 0.0), 1.0);
 
     require(result.valid, "a rejected outlier must preserve the stable result");
     require(std::abs(result.rateSecondsPerDay - 7.6) < 1.0,
@@ -187,10 +188,10 @@ void testTransientRateOutlierIsRejected()
 void testPersistentRateChangeIsEventuallyAccepted()
 {
     chronolab::MeasurementStabilizer stabilizer;
-    static_cast<void>(stabilizer.process(measurement(8.0)));
-    static_cast<void>(stabilizer.process(measurement(40.0)));
-    static_cast<void>(stabilizer.process(measurement(41.0)));
-    const auto result = stabilizer.process(measurement(39.0));
+    static_cast<void>(stabilizer.processAt(measurement(8.0), 0.0));
+    static_cast<void>(stabilizer.processAt(measurement(40.0), 1.0));
+    static_cast<void>(stabilizer.processAt(measurement(41.0), 1.2));
+    const auto result = stabilizer.processAt(measurement(39.0), 1.4);
 
     require(std::abs(result.rateSecondsPerDay - 39.0) < 1.0,
             "a confirmed new measurement cluster was not accepted");
@@ -201,20 +202,58 @@ void testConfidenceDisplayDoesNotPump()
     chronolab::MeasurementStabilizer stabilizer;
     std::vector<double> displayed;
     displayed.push_back(
-        stabilizer.process(measurement(8.0, 0.8, 88.0)).confidence);
+        stabilizer.processAt(measurement(8.0, 0.8, 88.0), 0.0).confidence);
     displayed.push_back(
-        stabilizer.process(measurement(8.1, 0.8, 55.0)).confidence);
+        stabilizer.processAt(measurement(8.1, 0.8, 55.0), 0.9).confidence);
     displayed.push_back(
-        stabilizer.process(measurement(7.9, 0.8, 92.0)).confidence);
+        stabilizer.processAt(measurement(7.9, 0.8, 92.0), 1.8).confidence);
     displayed.push_back(
-        stabilizer.process(measurement(8.2, 0.8, 50.0)).confidence);
+        stabilizer.processAt(measurement(8.2, 0.8, 50.0), 2.7).confidence);
     displayed.push_back(
-        stabilizer.process(measurement(8.0, 0.8, 90.0)).confidence);
+        stabilizer.processAt(measurement(8.0, 0.8, 90.0), 3.6).confidence);
 
     for (std::size_t index = 1; index < displayed.size(); ++index) {
         require(std::abs(displayed[index] - displayed[index - 1]) < 4.0,
                 "confidence display changed too abruptly");
     }
+}
+
+void testTransientInvalidWindowPreservesLock()
+{
+    chronolab::MeasurementStabilizer stabilizer;
+    const auto stable =
+        stabilizer.processAt(measurement(8.0, 0.8, 87.0), 0.0);
+
+    chronolab::AnalysisResult invalid;
+    invalid.status = "Battito non identificato con sufficiente affidabilità";
+    const auto degraded = stabilizer.processAt(invalid, 0.6);
+
+    require(degraded.valid,
+            "a brief invalid window must preserve the last measurement");
+    require(
+        degraded.state == chronolab::MeasurementState::Degraded,
+        "a held measurement must be marked as degraded");
+    require(std::abs(degraded.rateSecondsPerDay - stable.rateSecondsPerDay)
+                < 0.01,
+            "a brief invalid window changed the held rate");
+    require(degraded.confidence > 0.0 && degraded.confidence < stable.confidence,
+            "degraded confidence must decay gradually instead of dropping to zero");
+}
+
+void testSustainedInvalidSignalEventuallyUnlocks()
+{
+    chronolab::MeasurementStabilizer stabilizer;
+    static_cast<void>(
+        stabilizer.processAt(measurement(8.0, 0.8, 87.0), 0.0));
+
+    chronolab::AnalysisResult invalid;
+    invalid.status = "Battito non identificato con sufficiente affidabilità";
+    const auto lost = stabilizer.processAt(invalid, 3.1);
+
+    require(!lost.valid,
+            "a sustained invalid signal must eventually release the lock");
+    require(lost.state == chronolab::MeasurementState::Lost,
+            "a sustained invalid signal must be marked as lost");
 }
 
 } // namespace
@@ -235,6 +274,8 @@ int main()
         testTransientRateOutlierIsRejected();
         testPersistentRateChangeIsEventuallyAccepted();
         testConfidenceDisplayDoesNotPump();
+        testTransientInvalidWindowPreservesLock();
+        testSustainedInvalidSignalEventuallyUnlocks();
         testSilenceRejected();
     } catch (const TestFailure& failure) {
         std::cerr << "FAILED: " << failure.message << '\n';

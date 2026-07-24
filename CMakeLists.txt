@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(ChronoLab
-    VERSION 0.3.3
+    VERSION 0.3.4
     DESCRIPTION "Open-source mechanical watch timegrapher"
     LANGUAGES CXX
 )
@@ -84,6 +84,11 @@ if(CHRONOLAB_BUILD_TESTS)
             NAME chronolab_translation_catalogs
             COMMAND "${Python3_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_translations.py"
+        )
+        add_test(
+            NAME chronolab_project_consistency
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_project_consistency.py"
         )
     endif()
 endif()

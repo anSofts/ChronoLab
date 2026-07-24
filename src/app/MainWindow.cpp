@@ -66,10 +66,11 @@ MainWindow::MainWindow(LanguageManager& languageManager, QWidget* parent)
     connect(m_analysisWatcher, &QFutureWatcher<AnalysisJobResult>::finished,
             this, &MainWindow::finishAnalysis);
 
-    m_analysisTimer = new QTimer(this);
-    m_analysisTimer->setInterval(900);
-    connect(m_analysisTimer, &QTimer::timeout,
-            this, &MainWindow::analyzeBuffer);
+    m_liveDataTimer = new QTimer(this);
+    m_liveDataTimer->setTimerType(Qt::PreciseTimer);
+    m_liveDataTimer->setInterval(33);
+    connect(m_liveDataTimer, &QTimer::timeout,
+            this, &MainWindow::pollLiveData);
 
     connect(&m_capture, &AudioCapture::devicesChanged,
             this, &MainWindow::onDevicesChanged);
@@ -91,12 +92,12 @@ MainWindow::MainWindow(LanguageManager& languageManager, QWidget* parent)
                 m_startButton->style()->unpolish(m_startButton);
                 m_startButton->style()->polish(m_startButton);
                 if (running)
-                    m_analysisTimer->start();
+                    m_liveDataTimer->start();
                 else
-                    m_analysisTimer->stop();
+                    m_liveDataTimer->stop();
             });
     onDevicesChanged(m_capture.inputDeviceNames());
-    setWindowTitle(tr("ChronoLab 0.3.3 — Open Timegrapher"));
+    setWindowTitle(tr("ChronoLab 0.3.4 — Open Timegrapher"));
     resize(1360, 850);
     setMinimumSize(1024, 680);
     loadSettings();
@@ -359,7 +360,7 @@ void MainWindow::buildInterface()
     root->addWidget(splitter, 1);
 
     auto* footer = new QLabel(
-        tr("ChronoLab 0.3.3 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
+        tr("ChronoLab 0.3.4 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
     footer->setObjectName(QStringLiteral("footer"));
     root->addWidget(footer, 0, Qt::AlignRight);
 
@@ -457,7 +458,6 @@ void MainWindow::toggleCapture()
     }
 
     ++m_analysisGeneration;
-    m_analysisPending = false;
     m_measurementStabilizer.reset();
     m_audioBuffer.clear();
     m_lastResult = {};
@@ -490,10 +490,6 @@ void MainWindow::onSamples(const QVector<float>& samples, int sampleRate)
     if (m_audioBuffer.size() > maximumSamples)
         m_audioBuffer.remove(0, m_audioBuffer.size() - maximumSamples);
 
-    const qsizetype waveformSamples =
-        std::min<qsizetype>(m_audioBuffer.size(), sampleRate / 7);
-    m_signalPlot->setSamples(
-        m_audioBuffer.mid(m_audioBuffer.size() - waveformSamples, waveformSamples));
     m_saveWavButton->setEnabled(!m_audioBuffer.isEmpty());
 }
 
@@ -509,6 +505,21 @@ void MainWindow::updateLevel(float peak, float rms)
             "QProgressBar::chunk { background:#f08c75; border-radius:3px; }"));
     else
         m_levelMeter->setStyleSheet({});
+}
+
+void MainWindow::pollLiveData()
+{
+    if (m_sampleRate > 0 && !m_audioBuffer.isEmpty()) {
+        const qsizetype waveformSamples =
+            std::min<qsizetype>(m_audioBuffer.size(), m_sampleRate / 7);
+        m_signalPlot->setSamples(
+            m_audioBuffer.mid(
+                m_audioBuffer.size() - waveformSamples,
+                waveformSamples));
+    }
+
+    updateMeasurementUi(m_lastResult);
+    analyzeBuffer();
 }
 
 QString MainWindow::translatedAnalysisStatus(const std::string& status) const
@@ -527,6 +538,8 @@ QString MainWindow::translatedAnalysisStatus(const std::string& status) const
         return tr("Misurazione stabile");
     if (status == "Misurazione acquisita, qualità da migliorare")
         return tr("Misurazione acquisita, qualità da migliorare");
+    if (status == "Segnale temporaneamente instabile")
+        return tr("Segnale temporaneamente instabile");
     return QString::fromStdString(status);
 }
 
@@ -544,7 +557,6 @@ void MainWindow::analyzeBuffer()
         return;
 
     if (m_analysisWatcher->isRunning()) {
-        m_analysisPending = true;
         return;
     }
 
@@ -574,13 +586,10 @@ void MainWindow::finishAnalysis()
         m_lastResult = m_measurementStabilizer.process(job.result);
         updateMeasurementUi(m_lastResult);
         m_timegrapherPlot->setAnalysis(m_lastResult);
-        m_exportButton->setEnabled(m_lastResult.valid);
-        m_capturePositionButton->setEnabled(m_lastResult.valid);
-    }
-
-    if (m_analysisPending) {
-        m_analysisPending = false;
-        QTimer::singleShot(0, this, &MainWindow::analyzeBuffer);
+        const bool locked = m_lastResult.valid
+            && m_lastResult.state == MeasurementState::Locked;
+        m_exportButton->setEnabled(locked);
+        m_capturePositionButton->setEnabled(locked);
     }
 }
 
@@ -625,7 +634,8 @@ void MainWindow::updateMeasurementUi(const AnalysisResult& result)
             .arg(result.signalToNoiseDb, 0, 'f', 1)
             .arg(result.intervalJitterMilliseconds, 0, 'f', 2)
             .arg(result.events.size()),
-        result.confidence < 65.0);
+        result.confidence < 65.0
+            || result.state == MeasurementState::Degraded);
 }
 
 void MainWindow::openWav()
@@ -637,7 +647,6 @@ void MainWindow::openWav()
 
     m_capture.stop();
     ++m_analysisGeneration;
-    m_analysisPending = false;
     m_measurementStabilizer.reset();
     const WavData wav = WavFile::load(path);
     if (!wav.isValid()) {
@@ -742,7 +751,6 @@ void MainWindow::runSimulation()
 
     m_capture.stop();
     ++m_analysisGeneration;
-    m_analysisPending = false;
     m_measurementStabilizer.reset();
     m_audioBuffer.resize(static_cast<qsizetype>(generated.size()));
     std::copy(generated.begin(), generated.end(), m_audioBuffer.begin());
@@ -785,7 +793,8 @@ void MainWindow::saveWav()
 
 void MainWindow::exportCsv()
 {
-    if (!m_lastResult.valid)
+    if (!m_lastResult.valid
+        || m_lastResult.state != MeasurementState::Locked)
         return;
 
     QString path = QFileDialog::getSaveFileName(
@@ -820,7 +829,6 @@ void MainWindow::clearSession()
 {
     m_capture.stop();
     ++m_analysisGeneration;
-    m_analysisPending = false;
     m_measurementStabilizer.reset();
     m_audioBuffer.clear();
     m_sampleRate = 0;
@@ -882,7 +890,8 @@ void MainWindow::configurePositionMode(bool advanced)
 
 void MainWindow::capturePosition()
 {
-    if (!m_lastResult.valid)
+    if (!m_lastResult.valid
+        || m_lastResult.state != MeasurementState::Locked)
         return;
 
     const int position = m_positionCombo->currentData().toInt();

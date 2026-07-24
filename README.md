@@ -13,11 +13,17 @@ watches. It listens to an acoustic or contact sensor and estimates:
 The project is intentionally built from scratch. No source code from `tg` is
 included.
 
-> **Current status:** 0.3.3 real-signal preview. Rate, BPH, beat-error and
+> **Current status:** 0.3.4 real-signal preview. Rate, BPH, beat-error and
 > amplitude detection are tested with synthetic signals and the first recording from the
 > target USB contact microphone. Amplitude is displayed only when both
 > tick/tock profiles expose three coherent lift impulses; ambiguous signals
 > retain an honest ellipsis instead of a convincing fake number.
+
+Live audio and display data are polled at 30 Hz. Precision DSP runs
+asynchronously with backpressure, so a new heavy analysis starts as soon as the
+previous snapshot is complete without overlapping workers. Brief rejected
+windows preserve the last locked measurement with gradually decreasing
+confidence; a sustained loss releases the lock.
 
 ## Supported inputs
 
@@ -117,10 +123,10 @@ USB sensor / WAV
 Qt Multimedia capture -> normalized mono samples
         |
         v
-C++20 DSP core -> correlation lock -> temporal guard -> BPH / rate / beat error / quality
+C++20 DSP core -> correlation lock -> stateful temporal guard -> BPH / rate / beat error / quality
         |
         v
-Qt Widgets UI -> strip trace / waveform / CSV / WAV
+30 Hz live-data loop -> Qt Widgets UI / strip trace / waveform / CSV / WAV
 ```
 
 The DSP library does not depend on Qt. This makes it deterministic, testable

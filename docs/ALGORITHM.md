@@ -1,6 +1,6 @@
 # Analyzer design
 
-ChronoLab 0.3.3 uses a deterministic signal-processing pipeline:
+ChronoLab 0.3.4 uses a deterministic signal-processing pipeline:
 
 1. generate an RMS envelope and adaptive transient candidates for BPH scoring;
 2. isolate the sharp escapement content with independent second-order filters;
@@ -16,9 +16,13 @@ ChronoLab 0.3.3 uses a deterministic signal-processing pipeline:
 10. measure SNR on the escapement pulse band instead of broadband room audio;
 11. combine BPH fit, lock strength, period stability, SNR and jitter into
    confidence;
-12. median-filter consecutive overlapping measurements, smooth confidence and
-    require three coherent confirmations before accepting a large rate or BPH
-    change.
+12. retain a time-based history of overlapping measurements and smooth
+    confidence independently of the machine's analysis throughput;
+13. preserve the last locked measurement during brief rejected windows,
+    decrease confidence gradually and release the lock only after a sustained
+    loss;
+14. require a coherent candidate cluster over time before accepting a large
+    rate or BPH change.
 
 Rate never comes from the loudest acoustic peak. A physical contact sensor
 produces several resonances for each escapement event, and their relative
@@ -28,7 +32,9 @@ the timestamp.
 
 Analysis runs through Qt Concurrent in the desktop application. Audio capture
 and painting remain responsive while the platform-independent C++ core works
-on an immutable sample snapshot.
+on an immutable sample snapshot. The live-data loop polls at 33 ms
+(approximately 30.3 Hz); heavy DSP jobs are backpressured so only one immutable
+snapshot is analyzed at a time.
 
 ## Synthetic laboratory source
 

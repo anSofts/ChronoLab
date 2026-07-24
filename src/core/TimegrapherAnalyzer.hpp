@@ -6,6 +6,13 @@
 
 namespace chronolab {
 
+enum class MeasurementState {
+    Searching,
+    Locked,
+    Degraded,
+    Lost
+};
+
 struct AnalyzerConfig {
     double nominalBph = 0.0;       // 0 = automatic detection
     double liftAngleDegrees = 52.0;
@@ -22,6 +29,7 @@ struct BeatEvent {
 
 struct AnalysisResult {
     bool valid = false;
+    MeasurementState state = MeasurementState::Searching;
     double nominalBph = 0.0;
     double measuredBph = 0.0;
     double rateSecondsPerDay = 0.0;
@@ -49,15 +57,24 @@ public:
 class MeasurementStabilizer {
 public:
     [[nodiscard]] AnalysisResult process(const AnalysisResult& candidate);
+    [[nodiscard]] AnalysisResult processAt(
+        const AnalysisResult& candidate,
+        double timestampSeconds);
     void reset();
 
 private:
     std::vector<AnalysisResult> m_history;
+    std::vector<double> m_historyTimestamps;
     AnalysisResult m_pendingCandidate;
     AnalysisResult m_lastOutput;
     int m_pendingCount = 0;
+    double m_pendingSinceSeconds = 0.0;
+    double m_lastValidTimestampSeconds = 0.0;
+    double m_lastProcessTimestampSeconds = 0.0;
     double m_smoothedConfidence = 0.0;
     bool m_hasLastOutput = false;
+    bool m_hasLastValidTimestamp = false;
+    bool m_hasLastProcessTimestamp = false;
 };
 
 } // namespace chronolab
