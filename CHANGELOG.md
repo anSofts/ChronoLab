@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.5 — Beat Error Trust
+
+- Stabilizes displayed beat error with an independent eight-second temporal
+  median.
+- Rejects a single implausible beat-error collapse, including an isolated
+  0.00 ms reading, without freezing genuine persistent changes.
+- Accepts a changed beat-error level after three coherent observations spanning
+  at least 0.40 seconds.
+- Calculates robust dispersion from unfiltered observations using scaled median
+  absolute deviation.
+- Displays beat error as `value ± dispersion` after enough observations.
+- Reports `Beat error instabile` when robust dispersion exceeds 0.20 ms.
+- Exports beat-error dispersion and stability to CSV.
+- Adds deterministic regression tests for isolated collapse, unstable
+  observations and persistent legitimate changes.
+- Updates MULTI5, documentation and project consistency checks.
+
 ## 0.3.4 — Live Lock
 
 - Raises the live-data polling and presentation cadence from 900 ms to 33 ms

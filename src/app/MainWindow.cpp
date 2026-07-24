@@ -97,7 +97,7 @@ MainWindow::MainWindow(LanguageManager& languageManager, QWidget* parent)
                     m_liveDataTimer->stop();
             });
     onDevicesChanged(m_capture.inputDeviceNames());
-    setWindowTitle(tr("ChronoLab 0.3.4 — Open Timegrapher"));
+    setWindowTitle(tr("ChronoLab 0.3.5 — Open Timegrapher"));
     resize(1360, 850);
     setMinimumSize(1024, 680);
     loadSettings();
@@ -360,7 +360,7 @@ void MainWindow::buildInterface()
     root->addWidget(splitter, 1);
 
     auto* footer = new QLabel(
-        tr("ChronoLab 0.3.4 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
+        tr("ChronoLab 0.3.5 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
     footer->setObjectName(QStringLiteral("footer"));
     root->addWidget(footer, 0, Qt::AlignRight);
 
@@ -540,6 +540,8 @@ QString MainWindow::translatedAnalysisStatus(const std::string& status) const
         return tr("Misurazione acquisita, qualità da migliorare");
     if (status == "Segnale temporaneamente instabile")
         return tr("Segnale temporaneamente instabile");
+    if (status == "Beat error instabile")
+        return tr("Beat error instabile");
     return QString::fromStdString(status);
 }
 
@@ -620,7 +622,15 @@ void MainWindow::updateMeasurementUi(const AnalysisResult& result)
               .arg(analyzerConfig().liftAngleDegrees)
         : tr("Impulsi di levata non sufficientemente distinguibili"));
     m_beatErrorValue->setText(
-        QString::number(result.beatErrorMilliseconds, 'f', 2));
+        result.beatErrorDispersionAvailable
+            ? tr("%1 ±%2")
+                  .arg(result.beatErrorMilliseconds, 0, 'f', 2)
+                  .arg(result.beatErrorDispersionMilliseconds, 0, 'f', 2)
+            : QString::number(result.beatErrorMilliseconds, 'f', 2));
+    m_beatErrorValue->setToolTip(
+        result.beatErrorDispersionAvailable
+            ? tr("Mediana temporale del beat error · ± dispersione robusta")
+            : tr("Beat error in stabilizzazione"));
     m_bphValue->setText(
         QString::number(result.nominalBph, 'f', 0));
     m_bphValue->setToolTip(
@@ -635,7 +645,8 @@ void MainWindow::updateMeasurementUi(const AnalysisResult& result)
             .arg(result.intervalJitterMilliseconds, 0, 'f', 2)
             .arg(result.events.size()),
         result.confidence < 65.0
-            || result.state == MeasurementState::Degraded);
+            || result.state == MeasurementState::Degraded
+            || !result.beatErrorStable);
 }
 
 void MainWindow::openWav()
@@ -818,6 +829,10 @@ void MainWindow::exportCsv()
         << "measured_bph," << m_lastResult.measuredBph << ",bph\n"
         << "rate," << m_lastResult.rateSecondsPerDay << ",s/day\n"
         << "beat_error," << m_lastResult.beatErrorMilliseconds << ",ms\n"
+        << "beat_error_dispersion,"
+        << m_lastResult.beatErrorDispersionMilliseconds << ",ms\n"
+        << "beat_error_stable,"
+        << (m_lastResult.beatErrorStable ? 1 : 0) << ",boolean\n"
         << "confidence," << m_lastResult.confidence << ",percent\n"
         << "snr," << m_lastResult.signalToNoiseDb << ",dB\n"
         << "jitter," << m_lastResult.intervalJitterMilliseconds << ",ms\n"

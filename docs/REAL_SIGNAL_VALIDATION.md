@@ -77,3 +77,22 @@ The earlier TG amplitude of 278 degrees came from a separate same-watch
 measurement. It is useful as an engineering reference but not sufficient to
 calibrate the amplitude detector; a closely repeated or simultaneous
 comparison is still required.
+
+## 0.3.5 follow-up
+
+Beat error now has an independent eight-second temporal median and a robust
+dispersion calculated from raw, unfiltered observations. This protects the
+display from an isolated false collapse while retaining evidence of genuine
+instability.
+
+Reprocessing the same thirteen overlapping windows produced:
+
+- raw beat-error range: 0.948 to 0.979 ms;
+- final displayed beat error: 0.968 ms;
+- robust dispersion after warm-up: 0.006 to 0.012 ms;
+- every populated window classified as stable;
+- no rejected-window or false 0.00 ms transitions.
+
+These results demonstrate deterministic display stability on this recording.
+They do not replace multi-watch comparison against a calibrated reference
+instrument.

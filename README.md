@@ -13,7 +13,7 @@ watches. It listens to an acoustic or contact sensor and estimates:
 The project is intentionally built from scratch. No source code from `tg` is
 included.
 
-> **Current status:** 0.3.4 real-signal preview. Rate, BPH, beat-error and
+> **Current status:** 0.3.5 real-signal preview. Rate, BPH, beat-error and
 > amplitude detection are tested with synthetic signals and the first recording from the
 > target USB contact microphone. Amplitude is displayed only when both
 > tick/tock profiles expose three coherent lift impulses; ambiguous signals
@@ -24,6 +24,13 @@ asynchronously with backpressure, so a new heavy analysis starts as soon as the
 previous snapshot is complete without overlapping workers. Brief rejected
 windows preserve the last locked measurement with gradually decreasing
 confidence; a sustained loss releases the lock.
+
+Beat error is displayed as an eight-second temporal median. Once enough
+measurements are available, ChronoLab also shows robust dispersion as
+`value ± dispersion`. A single implausible collapse cannot replace the locked
+value, while a coherent change is accepted after confirmation. Persistently
+scattered readings are reported as unstable instead of being cosmetically
+frozen.
 
 ## Supported inputs
 

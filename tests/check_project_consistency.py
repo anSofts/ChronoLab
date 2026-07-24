@@ -53,11 +53,17 @@ def main() -> int:
         "Elaborazione locale, nessun dato inviato"
     )
     degraded_status = "Segnale temporaneamente instabile"
+    beat_error_status = "Beat error instabile"
     for language in ("en", "fr", "de", "es"):
         path = ROOT / "translations" / f"chronolab_{language}.json"
         catalog = json.loads(path.read_text(encoding="utf-8"))
         messages = catalog.get("translations", {}).get("MainWindow", {})
-        for source in (source_title, source_footer, degraded_status):
+        for source in (
+            source_title,
+            source_footer,
+            degraded_status,
+            beat_error_status,
+        ):
             if not messages.get(source):
                 failures.append(
                     f"{path.name}: missing or empty translation for {source!r}"
@@ -69,8 +75,8 @@ def main() -> int:
 
     print(
         f"ChronoLab {version} project consistency verified: "
-        "version markers, MULTI5 live-lock strings, 33 ms precise timer "
-        "and DSP backpressure."
+        "version markers, MULTI5 live-lock/beat-error strings, "
+        "33 ms precise timer and DSP backpressure."
     )
     return 0
 

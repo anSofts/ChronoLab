@@ -34,6 +34,9 @@ struct AnalysisResult {
     double measuredBph = 0.0;
     double rateSecondsPerDay = 0.0;
     double beatErrorMilliseconds = 0.0;
+    double beatErrorDispersionMilliseconds = 0.0;
+    bool beatErrorDispersionAvailable = false;
+    bool beatErrorStable = true;
     double amplitudeDegrees = 0.0;
     bool amplitudeAvailable = false;
     double confidence = 0.0;
@@ -65,10 +68,17 @@ public:
 private:
     std::vector<AnalysisResult> m_history;
     std::vector<double> m_historyTimestamps;
+    std::vector<double> m_beatErrorHistory;
+    std::vector<double> m_beatErrorHistoryTimestamps;
+    std::vector<double> m_rawBeatErrorHistory;
+    std::vector<double> m_rawBeatErrorHistoryTimestamps;
     AnalysisResult m_pendingCandidate;
     AnalysisResult m_lastOutput;
     int m_pendingCount = 0;
+    double m_pendingBeatErrorMilliseconds = 0.0;
+    int m_pendingBeatErrorCount = 0;
     double m_pendingSinceSeconds = 0.0;
+    double m_pendingBeatErrorSinceSeconds = 0.0;
     double m_lastValidTimestampSeconds = 0.0;
     double m_lastProcessTimestampSeconds = 0.0;
     double m_smoothedConfidence = 0.0;

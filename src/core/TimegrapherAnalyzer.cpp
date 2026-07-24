@@ -1047,8 +1047,13 @@ AnalysisResult MeasurementStabilizer::processAt(
     double timestampSeconds)
 {
     constexpr double kHistorySeconds = 4.5;
+    constexpr double kBeatErrorHistorySeconds = 8.0;
     constexpr double kDegradedGraceSeconds = 3.0;
     constexpr double kPendingConfirmationSeconds = 0.30;
+    constexpr double kBeatErrorOutlierMilliseconds = 0.35;
+    constexpr double kBeatErrorClusterToleranceMilliseconds = 0.18;
+    constexpr double kBeatErrorConfirmationSeconds = 0.40;
+    constexpr double kBeatErrorUnstableDispersionMilliseconds = 0.20;
 
     if (!candidate.valid) {
         m_pendingCount = 0;
@@ -1077,6 +1082,11 @@ AnalysisResult MeasurementStabilizer::processAt(
             : MeasurementState::Searching;
         m_history.clear();
         m_historyTimestamps.clear();
+        m_beatErrorHistory.clear();
+        m_beatErrorHistoryTimestamps.clear();
+        m_rawBeatErrorHistory.clear();
+        m_rawBeatErrorHistoryTimestamps.clear();
+        m_pendingBeatErrorCount = 0;
         m_hasLastValidTimestamp = false;
         m_lastProcessTimestampSeconds = timestampSeconds;
         m_hasLastProcessTimestamp = true;
@@ -1091,6 +1101,10 @@ AnalysisResult MeasurementStabilizer::processAt(
         locked.state = MeasurementState::Locked;
         m_history.push_back(locked);
         m_historyTimestamps.push_back(timestampSeconds);
+        m_beatErrorHistory.push_back(candidate.beatErrorMilliseconds);
+        m_beatErrorHistoryTimestamps.push_back(timestampSeconds);
+        m_rawBeatErrorHistory.push_back(candidate.beatErrorMilliseconds);
+        m_rawBeatErrorHistoryTimestamps.push_back(timestampSeconds);
         m_smoothedConfidence = candidate.confidence;
         m_lastOutput = locked;
         m_hasLastOutput = true;
@@ -1148,6 +1162,74 @@ AnalysisResult MeasurementStabilizer::processAt(
 
     AnalysisResult lockedCandidate = candidate;
     lockedCandidate.state = MeasurementState::Locked;
+
+    m_rawBeatErrorHistory.push_back(candidate.beatErrorMilliseconds);
+    m_rawBeatErrorHistoryTimestamps.push_back(timestampSeconds);
+    while (m_rawBeatErrorHistory.size() > 1
+           && m_rawBeatErrorHistoryTimestamps.front()
+               < timestampSeconds - kBeatErrorHistorySeconds) {
+        m_rawBeatErrorHistory.erase(m_rawBeatErrorHistory.begin());
+        m_rawBeatErrorHistoryTimestamps.erase(
+            m_rawBeatErrorHistoryTimestamps.begin());
+    }
+    if (m_rawBeatErrorHistory.size() > 256) {
+        m_rawBeatErrorHistory.erase(m_rawBeatErrorHistory.begin());
+        m_rawBeatErrorHistoryTimestamps.erase(
+            m_rawBeatErrorHistoryTimestamps.begin());
+    }
+
+    const double referenceBeatError = m_beatErrorHistory.empty()
+        ? candidate.beatErrorMilliseconds
+        : percentile(m_beatErrorHistory, 0.50);
+    const bool beatErrorJumped = !m_beatErrorHistory.empty()
+        && std::abs(candidate.beatErrorMilliseconds - referenceBeatError)
+            > kBeatErrorOutlierMilliseconds;
+    bool acceptBeatError = true;
+    if (beatErrorJumped) {
+        const bool continuesBeatErrorCluster =
+            m_pendingBeatErrorCount > 0
+            && std::abs(
+                   candidate.beatErrorMilliseconds
+                   - m_pendingBeatErrorMilliseconds)
+                <= kBeatErrorClusterToleranceMilliseconds;
+        if (continuesBeatErrorCluster) {
+            ++m_pendingBeatErrorCount;
+        } else {
+            m_pendingBeatErrorCount = 1;
+            m_pendingBeatErrorSinceSeconds = timestampSeconds;
+        }
+        m_pendingBeatErrorMilliseconds = candidate.beatErrorMilliseconds;
+
+        acceptBeatError =
+            m_pendingBeatErrorCount >= 3
+            && timestampSeconds - m_pendingBeatErrorSinceSeconds
+                >= kBeatErrorConfirmationSeconds;
+        if (acceptBeatError) {
+            m_beatErrorHistory.clear();
+            m_beatErrorHistoryTimestamps.clear();
+            m_pendingBeatErrorCount = 0;
+        }
+    } else {
+        m_pendingBeatErrorCount = 0;
+    }
+
+    if (acceptBeatError) {
+        m_beatErrorHistory.push_back(candidate.beatErrorMilliseconds);
+        m_beatErrorHistoryTimestamps.push_back(timestampSeconds);
+    }
+    while (m_beatErrorHistory.size() > 1
+           && m_beatErrorHistoryTimestamps.front()
+               < timestampSeconds - kBeatErrorHistorySeconds) {
+        m_beatErrorHistory.erase(m_beatErrorHistory.begin());
+        m_beatErrorHistoryTimestamps.erase(
+            m_beatErrorHistoryTimestamps.begin());
+    }
+    if (m_beatErrorHistory.size() > 256) {
+        m_beatErrorHistory.erase(m_beatErrorHistory.begin());
+        m_beatErrorHistoryTimestamps.erase(
+            m_beatErrorHistoryTimestamps.begin());
+    }
+
     m_history.push_back(lockedCandidate);
     m_historyTimestamps.push_back(timestampSeconds);
     while (m_history.size() > 1
@@ -1164,8 +1246,22 @@ AnalysisResult MeasurementStabilizer::processAt(
     AnalysisResult stabilized = lockedCandidate;
     stabilized.rateSecondsPerDay =
         medianOfResults(m_history, &AnalysisResult::rateSecondsPerDay);
-    stabilized.beatErrorMilliseconds =
-        medianOfResults(m_history, &AnalysisResult::beatErrorMilliseconds);
+    stabilized.beatErrorMilliseconds = percentile(
+        m_beatErrorHistory, 0.50);
+    stabilized.beatErrorDispersionAvailable =
+        m_rawBeatErrorHistory.size() >= 5;
+    if (stabilized.beatErrorDispersionAvailable) {
+        const double rawMedian = percentile(m_rawBeatErrorHistory, 0.50);
+        std::vector<double> deviations;
+        deviations.reserve(m_rawBeatErrorHistory.size());
+        for (const double value : m_rawBeatErrorHistory)
+            deviations.push_back(std::abs(value - rawMedian));
+        stabilized.beatErrorDispersionMilliseconds =
+            1.4826 * percentile(std::move(deviations), 0.50);
+        stabilized.beatErrorStable =
+            stabilized.beatErrorDispersionMilliseconds
+                <= kBeatErrorUnstableDispersionMilliseconds;
+    }
     stabilized.signalToNoiseDb =
         medianOfResults(m_history, &AnalysisResult::signalToNoiseDb);
     stabilized.intervalJitterMilliseconds =
@@ -1207,6 +1303,8 @@ AnalysisResult MeasurementStabilizer::processAt(
         stabilized.measuredBph = stabilized.nominalBph
             * (1.0 + stabilized.rateSecondsPerDay / kSecondsPerDay);
     }
+    if (!stabilized.beatErrorStable)
+        stabilized.status = "Beat error instabile";
     stabilized.state = MeasurementState::Locked;
     m_lastOutput = stabilized;
     m_hasLastOutput = true;
@@ -1219,10 +1317,17 @@ void MeasurementStabilizer::reset()
 {
     m_history.clear();
     m_historyTimestamps.clear();
+    m_beatErrorHistory.clear();
+    m_beatErrorHistoryTimestamps.clear();
+    m_rawBeatErrorHistory.clear();
+    m_rawBeatErrorHistoryTimestamps.clear();
     m_pendingCandidate = {};
     m_lastOutput = {};
     m_pendingCount = 0;
+    m_pendingBeatErrorMilliseconds = 0.0;
+    m_pendingBeatErrorCount = 0;
     m_pendingSinceSeconds = 0.0;
+    m_pendingBeatErrorSinceSeconds = 0.0;
     m_lastValidTimestampSeconds = 0.0;
     m_lastProcessTimestampSeconds = 0.0;
     m_smoothedConfidence = 0.0;

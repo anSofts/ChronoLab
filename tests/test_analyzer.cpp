@@ -1,6 +1,7 @@
 #include "core/TimegrapherAnalyzer.hpp"
 #include "core/SyntheticWatch.hpp"
 
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -256,6 +257,72 @@ void testSustainedInvalidSignalEventuallyUnlocks()
             "a sustained invalid signal must be marked as lost");
 }
 
+void testSingleBeatErrorCollapseIsRejected()
+{
+    chronolab::MeasurementStabilizer stabilizer;
+    static_cast<void>(
+        stabilizer.processAt(measurement(8.0, 0.60, 87.0), 0.0));
+    static_cast<void>(
+        stabilizer.processAt(measurement(8.0, 0.62, 87.0), 0.3));
+    static_cast<void>(
+        stabilizer.processAt(measurement(8.0, 0.58, 87.0), 0.6));
+    const auto collapsed =
+        stabilizer.processAt(measurement(8.0, 0.00, 87.0), 0.9);
+
+    require(collapsed.beatErrorMilliseconds > 0.50,
+            "one 0.00 ms window collapsed the displayed beat error");
+
+    const auto recovered =
+        stabilizer.processAt(measurement(8.0, 0.61, 87.0), 1.2);
+    require(recovered.beatErrorDispersionAvailable,
+            "beat-error dispersion should be available after five readings");
+    require(recovered.beatErrorStable,
+            "one isolated outlier must not mark beat error as unstable");
+}
+
+void testBeatErrorInstabilityIsReported()
+{
+    chronolab::MeasurementStabilizer stabilizer;
+    const std::array<double, 7> values {
+        0.20, 0.70, 0.30, 0.80, 0.40, 0.90, 0.50
+    };
+
+    chronolab::AnalysisResult result;
+    double timestamp = 0.0;
+    for (const double value : values) {
+        result = stabilizer.processAt(
+            measurement(8.0, value, 87.0), timestamp);
+        timestamp += 0.25;
+    }
+
+    require(result.beatErrorDispersionAvailable,
+            "unstable beat error must expose dispersion");
+    require(result.beatErrorDispersionMilliseconds > 0.20,
+            "beat-error dispersion did not reveal unstable readings");
+    require(!result.beatErrorStable,
+            "unstable beat error was incorrectly marked stable");
+    require(result.status == "Beat error instabile",
+            "unstable beat error must be visible in measurement status");
+}
+
+void testPersistentBeatErrorChangeIsAccepted()
+{
+    chronolab::MeasurementStabilizer stabilizer;
+    static_cast<void>(
+        stabilizer.processAt(measurement(8.0, 0.60, 87.0), 0.0));
+    static_cast<void>(
+        stabilizer.processAt(measurement(8.0, 0.62, 87.0), 0.3));
+    static_cast<void>(
+        stabilizer.processAt(measurement(8.0, 1.00, 87.0), 1.0));
+    static_cast<void>(
+        stabilizer.processAt(measurement(8.0, 1.05, 87.0), 1.25));
+    const auto changed =
+        stabilizer.processAt(measurement(8.0, 1.02, 87.0), 1.5);
+
+    require(std::abs(changed.beatErrorMilliseconds - 1.02) < 0.05,
+            "a persistent beat-error change was not accepted");
+}
+
 } // namespace
 
 int main()
@@ -276,6 +343,9 @@ int main()
         testConfidenceDisplayDoesNotPump();
         testTransientInvalidWindowPreservesLock();
         testSustainedInvalidSignalEventuallyUnlocks();
+        testSingleBeatErrorCollapseIsRejected();
+        testBeatErrorInstabilityIsReported();
+        testPersistentBeatErrorChangeIsAccepted();
         testSilenceRejected();
     } catch (const TestFailure& failure) {
         std::cerr << "FAILED: " << failure.message << '\n';

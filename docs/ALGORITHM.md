@@ -1,6 +1,6 @@
 # Analyzer design
 
-ChronoLab 0.3.4 uses a deterministic signal-processing pipeline:
+ChronoLab 0.3.5 uses a deterministic signal-processing pipeline:
 
 1. generate an RMS envelope and adaptive transient candidates for BPH scoring;
 2. isolate the sharp escapement content with independent second-order filters;
@@ -22,7 +22,12 @@ ChronoLab 0.3.4 uses a deterministic signal-processing pipeline:
     decrease confidence gradually and release the lock only after a sustained
     loss;
 14. require a coherent candidate cluster over time before accepting a large
-    rate or BPH change.
+    rate or BPH change;
+15. stabilize beat error independently over eight seconds, reject an isolated
+    collapse and accept a new level only after a coherent temporal cluster;
+16. calculate robust beat-error dispersion from the unfiltered observations so
+    genuine instability remains visible even while the numerical median is
+    protected.
 
 Rate never comes from the loudest acoustic peak. A physical contact sensor
 produces several resonances for each escapement event, and their relative
@@ -59,6 +64,9 @@ case geometry or real escapement will behave.
 - beat error is the displacement of the tick/tock separation from the ideal
   half-cycle, estimated with one-direction tick-to-tock correlation so the
   inverse comparison cannot cancel the offset.
+- displayed beat error is the median of accepted observations over eight
+  seconds. Its `±` value is `1.4826 * median(abs(x - median(x)))`, calculated
+  from raw observations. Dispersion above 0.20 ms is reported as unstable.
 - `amplitude_deg = 3600 * lift_angle_deg / (pi * nominal_bph * lift_time_s)`
   where lift time is the robust first-to-third impulse separation.
 
