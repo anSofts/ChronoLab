@@ -1,0 +1,10 @@
+/build*/
+/.qt/
+/.qtc_clangd/
+/CMakeUserPresets.json
+*.user
+*.wav
+*.csv
+*.exe
+*.app/
+chronolab_core_tests
