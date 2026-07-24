@@ -1,6 +1,6 @@
 # Analyzer design
 
-ChronoLab 0.1 uses a deterministic signal-processing pipeline:
+ChronoLab 0.2 uses a deterministic signal-processing pipeline:
 
 1. remove DC and low-frequency handling noise with a first-order high-pass;
 2. generate a short RMS envelope;
@@ -14,6 +14,25 @@ ChronoLab 0.1 uses a deterministic signal-processing pipeline:
 
 This design avoids using only the loudest spectral peak, which can easily be a
 harmonic of the actual beat frequency.
+
+Analysis runs through Qt Concurrent in the desktop application. Audio capture
+and painting remain responsive while the platform-independent C++ core works
+on an immutable sample snapshot.
+
+## Synthetic laboratory source
+
+The built-in simulator produces repeatable:
+
+- standard and low BPH rates;
+- positive or negative daily rate;
+- alternating intervals for known beat error;
+- three distinct damped pulse clusters per beat;
+- white noise and low-level 50 Hz interference;
+- optional missing impulses.
+
+Synthetic signals prove that calculations recover known input parameters and
+exercise the complete application. They cannot prove how a physical sensor,
+case geometry or real escapement will behave.
 
 ## Measurement definitions
 

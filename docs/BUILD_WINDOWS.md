@@ -13,6 +13,9 @@
    `chronolab_core_tests`.
 6. Build and run.
 
+The application can be tested immediately without the USB sensor by selecting
+**Simulatore**. Start with 21,600 A/h, +8 s/day and 0.40 ms.
+
 Run the `chronolab_core_tests` target once as well. Its console must end with:
 
 ```text
@@ -55,6 +58,10 @@ Inside ChronoLab:
 5. fit the watch firmly without touching the cable;
 6. wait at least 15 seconds;
 7. save the raw WAV before changing position.
+
+The standard positional session contains only **Quadrante in alto** and
+**Fondello in alto**, matching the target holder. The six-position checkbox is
+optional and intended for different or future holders.
 
 If the level stays red, reduce the Windows input level. If it barely moves,
 increase the input level or improve physical contact before changing software

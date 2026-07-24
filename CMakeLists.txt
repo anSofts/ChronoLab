@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(ChronoLab
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "Open-source mechanical watch timegrapher"
     LANGUAGES CXX
 )
@@ -14,6 +14,7 @@ option(CHRONOLAB_BUILD_APP "Build the Qt desktop application" ON)
 option(CHRONOLAB_BUILD_TESTS "Build the DSP tests" ON)
 
 add_library(chronolab_core
+    src/core/SyntheticWatch.cpp
     src/core/TimegrapherAnalyzer.cpp
 )
 target_include_directories(chronolab_core PUBLIC src)
@@ -26,7 +27,7 @@ else()
 endif()
 
 if(CHRONOLAB_BUILD_APP)
-    find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Multimedia)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Multimedia Concurrent)
 
     qt_standard_project_setup()
 
@@ -48,6 +49,7 @@ if(CHRONOLAB_BUILD_APP)
         chronolab_core
         Qt6::Widgets
         Qt6::Multimedia
+        Qt6::Concurrent
     )
 
     set_target_properties(ChronoLab PROPERTIES

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0 — Test without hardware
+
+- Added configurable deterministic watch-signal simulator.
+- Added synthetic unlock/impulse/drop-like pulse clusters, noise, rate, beat
+  error and optional missed impulses.
+- Added standard two-position sessions for the target holder: dial up and
+  caseback up.
+- Added optional advanced six-position sessions, disabled by default.
+- Added positional mean and rate-spread summary.
+- Moved DSP analysis to Qt Concurrent so audio and UI remain responsive.
+- Added persistence for window geometry, audio device, BPH, lift angle and
+  position mode.
+
 ## 0.1.0 — Engineering preview
 
 - Added Qt 6 desktop interface for Windows, macOS and Linux.

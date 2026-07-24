@@ -1,33 +1,43 @@
 #include "app/MainWindow.hpp"
 
 #include "audio/WavFile.hpp"
+#include "core/SyntheticWatch.hpp"
 #include "widgets/SignalPlotWidget.hpp"
 #include "widgets/TimegrapherPlotWidget.hpp"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
-#include <QDesktopServices>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileDialog>
+#include <QFormLayout>
 #include <QFrame>
+#include <QFutureWatcher>
 #include <QGridLayout>
+#include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
-#include <QScrollArea>
+#include <QSettings>
 #include <QSplitter>
+#include <QSpinBox>
 #include <QStatusBar>
 #include <QStyle>
+#include <QTableWidget>
 #include <QTextStream>
 #include <QTimer>
-#include <QUrl>
 #include <QVBoxLayout>
+#include <QtConcurrentRun>
 
 #include <algorithm>
 #include <cmath>
-#include <span>
+#include <numeric>
+#include <vector>
 
 namespace chronolab {
 namespace {
@@ -49,6 +59,10 @@ MainWindow::MainWindow(QWidget* parent)
 {
     buildInterface();
     applyTheme();
+
+    m_analysisWatcher = new QFutureWatcher<AnalysisJobResult>(this);
+    connect(m_analysisWatcher, &QFutureWatcher<AnalysisJobResult>::finished,
+            this, &MainWindow::finishAnalysis);
 
     m_analysisTimer = new QTimer(this);
     m_analysisTimer->setInterval(900);
@@ -81,10 +95,18 @@ MainWindow::MainWindow(QWidget* parent)
             });
 
     onDevicesChanged(m_capture.inputDeviceNames());
-    setWindowTitle(tr("ChronoLab 0.1 — Open Timegrapher"));
+    setWindowTitle(tr("ChronoLab 0.2 — Open Timegrapher"));
     resize(1360, 850);
     setMinimumSize(1024, 680);
+    loadSettings();
     setStatus(tr("Pronto. Seleziona il sensore USB e avvia l'ascolto."));
+}
+
+MainWindow::~MainWindow()
+{
+    saveSettings();
+    if (m_analysisWatcher && m_analysisWatcher->isRunning())
+        m_analysisWatcher->waitForFinished();
 }
 
 QWidget* MainWindow::createMetricCard(
@@ -143,16 +165,20 @@ void MainWindow::buildInterface()
     header->addStretch();
 
     auto* openButton = makeButton(tr("Apri WAV"));
+    auto* simulationButton = makeButton(tr("Simulatore"));
     m_saveWavButton = makeButton(tr("Salva WAV"));
     m_exportButton = makeButton(tr("Esporta CSV"));
     auto* clearButton = makeButton(tr("Nuova sessione"));
     header->addWidget(openButton);
+    header->addWidget(simulationButton);
     header->addWidget(m_saveWavButton);
     header->addWidget(m_exportButton);
     header->addWidget(clearButton);
     root->addLayout(header);
 
     connect(openButton, &QPushButton::clicked, this, &MainWindow::openWav);
+    connect(simulationButton, &QPushButton::clicked,
+            this, &MainWindow::runSimulation);
     connect(m_saveWavButton, &QPushButton::clicked, this, &MainWindow::saveWav);
     connect(m_exportButton, &QPushButton::clicked, this, &MainWindow::exportCsv);
     connect(clearButton, &QPushButton::clicked, this, &MainWindow::clearSession);
@@ -213,6 +239,37 @@ void MainWindow::buildInterface()
     connect(m_liftAngleCombo, &QComboBox::currentIndexChanged,
             this, &MainWindow::analyzeBuffer);
 
+    auto* positionBar = new QFrame;
+    positionBar->setObjectName(QStringLiteral("controlBar"));
+    auto* positionLayout = new QHBoxLayout(positionBar);
+    positionLayout->setContentsMargins(15, 8, 15, 8);
+    positionLayout->setSpacing(10);
+    auto* positionLabel = new QLabel(tr("POSIZIONE"));
+    positionLabel->setObjectName(QStringLiteral("controlLabel"));
+    m_positionCombo = new QComboBox;
+    m_positionCombo->setMinimumWidth(190);
+    m_advancedPositionsCheck = new QCheckBox(tr("Modalità avanzata: 6 posizioni"));
+    m_advancedPositionsCheck->setToolTip(
+        tr("Facoltativa: la modalità standard usa solo quadrante e fondello"));
+    m_capturePositionButton = makeButton(tr("Registra questa posizione"));
+    m_sessionButton = makeButton(tr("Riepilogo (0/2)"));
+    positionLayout->addWidget(positionLabel);
+    positionLayout->addWidget(m_positionCombo);
+    positionLayout->addWidget(m_advancedPositionsCheck);
+    positionLayout->addStretch();
+    positionLayout->addWidget(m_capturePositionButton);
+    positionLayout->addWidget(m_sessionButton);
+    root->addWidget(positionBar);
+
+    connect(m_advancedPositionsCheck, &QCheckBox::toggled,
+            this, &MainWindow::configurePositionMode);
+    connect(m_capturePositionButton, &QPushButton::clicked,
+            this, &MainWindow::capturePosition);
+    connect(m_sessionButton, &QPushButton::clicked,
+            this, &MainWindow::showPositionSummary);
+    configurePositionMode(false);
+    m_capturePositionButton->setEnabled(false);
+
     auto* metrics = new QGridLayout;
     metrics->setHorizontalSpacing(10);
     metrics->setVerticalSpacing(10);
@@ -272,7 +329,7 @@ void MainWindow::buildInterface()
     root->addWidget(splitter, 1);
 
     auto* footer = new QLabel(
-        tr("ChronoLab 0.1 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
+        tr("ChronoLab 0.2 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
     footer->setObjectName(QStringLiteral("footer"));
     root->addWidget(footer, 0, Qt::AlignRight);
 
@@ -369,6 +426,8 @@ void MainWindow::toggleCapture()
         return;
     }
 
+    ++m_analysisGeneration;
+    m_analysisPending = false;
     m_audioBuffer.clear();
     m_lastResult = {};
     m_timegrapherPlot->clear();
@@ -435,22 +494,51 @@ void MainWindow::analyzeBuffer()
     if (m_sampleRate <= 0 || m_audioBuffer.size() < m_sampleRate * 2)
         return;
 
+    if (m_analysisWatcher->isRunning()) {
+        m_analysisPending = true;
+        return;
+    }
+
     const qsizetype analysisSamples =
         std::min<qsizetype>(m_audioBuffer.size(), static_cast<qsizetype>(m_sampleRate) * 18);
     const float* begin = m_audioBuffer.constData()
         + (m_audioBuffer.size() - analysisSamples);
-    m_lastResult = m_analyzer.analyze(
-        std::span<const float>(begin, static_cast<std::size_t>(analysisSamples)),
-        m_sampleRate,
-        analyzerConfig());
-    updateMeasurementUi(m_lastResult);
-    m_timegrapherPlot->setAnalysis(m_lastResult);
-    m_exportButton->setEnabled(m_lastResult.valid);
+    std::vector<float> samples(begin, begin + analysisSamples);
+    const int sampleRate = m_sampleRate;
+    const AnalyzerConfig config = analyzerConfig();
+    const quint64 generation = m_analysisGeneration;
+
+    m_analysisWatcher->setFuture(QtConcurrent::run(
+        [samples = std::move(samples), sampleRate, config, generation]() {
+            TimegrapherAnalyzer analyzer;
+            AnalysisJobResult job;
+            job.generation = generation;
+            job.result = analyzer.analyze(samples, sampleRate, config);
+            return job;
+        }));
+}
+
+void MainWindow::finishAnalysis()
+{
+    const AnalysisJobResult job = m_analysisWatcher->result();
+    if (job.generation == m_analysisGeneration) {
+        m_lastResult = job.result;
+        updateMeasurementUi(m_lastResult);
+        m_timegrapherPlot->setAnalysis(m_lastResult);
+        m_exportButton->setEnabled(m_lastResult.valid);
+        m_capturePositionButton->setEnabled(m_lastResult.valid);
+    }
+
+    if (m_analysisPending) {
+        m_analysisPending = false;
+        QTimer::singleShot(0, this, &MainWindow::analyzeBuffer);
+    }
 }
 
 void MainWindow::updateMeasurementUi(const AnalysisResult& result)
 {
     if (!result.valid) {
+        m_capturePositionButton->setEnabled(false);
         m_rateValue->setText(QStringLiteral("—"));
         m_amplitudeValue->setText(QStringLiteral("—"));
         m_beatErrorValue->setText(QStringLiteral("—"));
@@ -499,6 +587,8 @@ void MainWindow::openWav()
         return;
 
     m_capture.stop();
+    ++m_analysisGeneration;
+    m_analysisPending = false;
     const WavData wav = WavFile::load(path);
     if (!wav.isValid()) {
         QMessageBox::critical(this, tr("WAV non leggibile"), wav.error);
@@ -516,6 +606,101 @@ void MainWindow::openWav()
     m_saveWavButton->setEnabled(true);
     analyzeBuffer();
     setStatus(tr("Registrazione caricata: %1").arg(path));
+}
+
+void MainWindow::runSimulation()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Simulatore di orologio"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* explanation = new QLabel(
+        tr("Genera un segnale di laboratorio che attraversa lo stesso motore "
+           "DSP usato dal microfono. Non sostituisce la validazione reale."));
+    explanation->setWordWrap(true);
+    layout->addWidget(explanation);
+
+    auto* form = new QFormLayout;
+    auto* bph = new QComboBox;
+    for (const double value : TimegrapherAnalyzer::standardBeatRates())
+        bph->addItem(QString::number(value, 'f', 0), value);
+    bph->setCurrentIndex(bph->findData(21600.0));
+
+    auto* rate = new QDoubleSpinBox;
+    rate->setRange(-300.0, 300.0);
+    rate->setDecimals(1);
+    rate->setSuffix(tr(" s/g"));
+    rate->setValue(8.0);
+
+    auto* beatError = new QDoubleSpinBox;
+    beatError->setRange(0.0, 9.9);
+    beatError->setDecimals(2);
+    beatError->setSuffix(tr(" ms"));
+    beatError->setValue(0.40);
+
+    auto* noise = new QDoubleSpinBox;
+    noise->setRange(0.0, 0.10);
+    noise->setDecimals(4);
+    noise->setSingleStep(0.001);
+    noise->setValue(0.004);
+
+    auto* duration = new QSpinBox;
+    duration->setRange(5, 60);
+    duration->setSuffix(tr(" s"));
+    duration->setValue(20);
+
+    auto* dropEvery = new QSpinBox;
+    dropEvery->setRange(0, 30);
+    dropEvery->setSpecialValueText(tr("Nessuno"));
+    dropEvery->setValue(0);
+
+    form->addRow(tr("Frequenza:"), bph);
+    form->addRow(tr("Marcia:"), rate);
+    form->addRow(tr("Beat error:"), beatError);
+    form->addRow(tr("Rumore:"), noise);
+    form->addRow(tr("Durata:"), duration);
+    form->addRow(tr("Perdi un impulso ogni:"), dropEvery);
+    layout->addLayout(form);
+
+    auto* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Genera e analizza"));
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    SyntheticWatchConfig config;
+    config.sampleRate = 48000;
+    config.durationSeconds = duration->value();
+    config.nominalBph = bph->currentData().toDouble();
+    config.rateSecondsPerDay = rate->value();
+    config.beatErrorMilliseconds = beatError->value();
+    config.noiseLevel = noise->value();
+    config.dropEvery = dropEvery->value();
+    const std::vector<float> generated = SyntheticWatch::generate(config);
+
+    m_capture.stop();
+    ++m_analysisGeneration;
+    m_analysisPending = false;
+    m_audioBuffer.resize(static_cast<qsizetype>(generated.size()));
+    std::copy(generated.begin(), generated.end(), m_audioBuffer.begin());
+    m_sampleRate = config.sampleRate;
+    m_bphCombo->setCurrentIndex(m_bphCombo->findData(0.0));
+
+    const qsizetype waveformSamples =
+        std::min<qsizetype>(m_audioBuffer.size(), m_sampleRate / 7);
+    m_signalPlot->setSamples(
+        m_audioBuffer.mid(m_audioBuffer.size() - waveformSamples, waveformSamples));
+    m_formatLabel->setText(
+        tr("SIMULAZIONE · %1 A/h · %2 Hz · segnale sintetico")
+            .arg(config.nominalBph, 0, 'f', 0)
+            .arg(config.sampleRate));
+    m_levelMeter->setValue(820);
+    m_saveWavButton->setEnabled(true);
+    setStatus(tr("Simulazione generata; analisi in corso…"));
+    analyzeBuffer();
 }
 
 void MainWindow::saveWav()
@@ -574,6 +759,8 @@ void MainWindow::exportCsv()
 void MainWindow::clearSession()
 {
     m_capture.stop();
+    ++m_analysisGeneration;
+    m_analysisPending = false;
     m_audioBuffer.clear();
     m_sampleRate = 0;
     m_lastResult = {};
@@ -583,6 +770,9 @@ void MainWindow::clearSession()
     m_formatLabel->setText(tr("Nessun flusso audio"));
     m_saveWavButton->setEnabled(false);
     m_exportButton->setEnabled(false);
+    m_capturePositionButton->setEnabled(false);
+    m_positionResults.fill(std::nullopt);
+    updateSessionButton();
     updateMeasurementUi({});
     setStatus(tr("Nuova sessione pronta"));
 }
@@ -600,6 +790,184 @@ void MainWindow::showAudioHelp()
            "4. Appoggia saldamente la cassa al sensore e non muovere il cavo.\n\n"
            "ChronoLab applica i propri filtri al segnale grezzo."));
     box.exec();
+}
+
+QStringList MainWindow::positionNames()
+{
+    return {
+        tr("Quadrante in alto"),
+        tr("Fondello in alto"),
+        tr("Corona in alto"),
+        tr("Corona in basso"),
+        tr("Corona a sinistra"),
+        tr("Corona a destra")
+    };
+}
+
+void MainWindow::configurePositionMode(bool advanced)
+{
+    const int previousPosition = m_positionCombo->currentData().toInt();
+    m_positionCombo->clear();
+    const QStringList names = positionNames();
+    const int count = advanced ? 6 : 2;
+    for (int i = 0; i < count; ++i)
+        m_positionCombo->addItem(names.at(i), i);
+
+    const int restored = m_positionCombo->findData(previousPosition);
+    if (restored >= 0)
+        m_positionCombo->setCurrentIndex(restored);
+    updateSessionButton();
+}
+
+void MainWindow::capturePosition()
+{
+    if (!m_lastResult.valid)
+        return;
+
+    const int position = m_positionCombo->currentData().toInt();
+    if (position < 0 || position >= static_cast<int>(m_positionResults.size()))
+        return;
+
+    m_positionResults[static_cast<std::size_t>(position)] = m_lastResult;
+    updateSessionButton();
+    setStatus(tr("Misurazione registrata: %1")
+                  .arg(m_positionCombo->currentText()));
+
+    if (m_positionCombo->currentIndex() + 1 < m_positionCombo->count())
+        m_positionCombo->setCurrentIndex(m_positionCombo->currentIndex() + 1);
+}
+
+void MainWindow::updateSessionButton()
+{
+    if (!m_sessionButton)
+        return;
+
+    const int total = m_advancedPositionsCheck
+        && m_advancedPositionsCheck->isChecked() ? 6 : 2;
+    int recorded = 0;
+    for (int i = 0; i < total; ++i) {
+        if (m_positionResults[static_cast<std::size_t>(i)].has_value())
+            ++recorded;
+    }
+    m_sessionButton->setText(
+        tr("Riepilogo (%1/%2)").arg(recorded).arg(total));
+}
+
+void MainWindow::showPositionSummary()
+{
+    const int total = m_advancedPositionsCheck->isChecked() ? 6 : 2;
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Riepilogo posizionale"));
+    dialog.resize(760, 400);
+    auto* layout = new QVBoxLayout(&dialog);
+
+    auto* modeLabel = new QLabel(total == 2
+        ? tr("Sessione standard: quadrante e fondello")
+        : tr("Sessione avanzata facoltativa: sei posizioni"));
+    modeLabel->setObjectName(QStringLiteral("subtitle"));
+    layout->addWidget(modeLabel);
+
+    auto* table = new QTableWidget(total, 5);
+    table->setHorizontalHeaderLabels({
+        tr("Posizione"), tr("Marcia"), tr("Beat error"),
+        tr("A/h"), tr("Affidabilità")
+    });
+    table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    table->verticalHeader()->setVisible(false);
+    table->setSelectionMode(QAbstractItemView::NoSelection);
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    const QStringList names = positionNames();
+    std::vector<double> rates;
+    for (int row = 0; row < total; ++row) {
+        table->setItem(row, 0, new QTableWidgetItem(names.at(row)));
+        const auto& measurement = m_positionResults[static_cast<std::size_t>(row)];
+        if (!measurement) {
+            for (int column = 1; column < 5; ++column)
+                table->setItem(row, column, new QTableWidgetItem(QStringLiteral("—")));
+            continue;
+        }
+
+        rates.push_back(measurement->rateSecondsPerDay);
+        table->setItem(row, 1, new QTableWidgetItem(
+            tr("%1 s/g").arg(measurement->rateSecondsPerDay, 0, 'f', 1)));
+        table->setItem(row, 2, new QTableWidgetItem(
+            tr("%1 ms").arg(measurement->beatErrorMilliseconds, 0, 'f', 2)));
+        table->setItem(row, 3, new QTableWidgetItem(
+            QString::number(measurement->nominalBph, 'f', 0)));
+        table->setItem(row, 4, new QTableWidgetItem(
+            tr("%1%").arg(measurement->confidence, 0, 'f', 0)));
+    }
+    layout->addWidget(table);
+
+    auto* summary = new QLabel;
+    if (rates.empty()) {
+        summary->setText(tr("Nessuna posizione registrata."));
+    } else {
+        const double mean = std::accumulate(rates.begin(), rates.end(), 0.0)
+            / rates.size();
+        const auto [minimum, maximum] =
+            std::minmax_element(rates.begin(), rates.end());
+        summary->setText(
+            tr("Media: %1 s/g · Scarto posizionale: %2 s/g · Posizioni: %3/%4")
+                .arg(mean, 0, 'f', 1)
+                .arg(*maximum - *minimum, 0, 'f', 1)
+                .arg(rates.size())
+                .arg(total));
+    }
+    summary->setObjectName(QStringLiteral("analysisStatus"));
+    layout->addWidget(summary);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+    auto* reset = buttons->addButton(
+        tr("Azzera posizioni"), QDialogButtonBox::ResetRole);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(reset, &QPushButton::clicked, &dialog, [this, &dialog]() {
+        m_positionResults.fill(std::nullopt);
+        updateSessionButton();
+        dialog.accept();
+    });
+    layout->addWidget(buttons);
+    dialog.exec();
+}
+
+void MainWindow::loadSettings()
+{
+    QSettings settings;
+    restoreGeometry(settings.value(QStringLiteral("ui/geometry")).toByteArray());
+
+    const int bphIndex = m_bphCombo->findData(
+        settings.value(QStringLiteral("analysis/bph"), 0.0).toDouble());
+    if (bphIndex >= 0)
+        m_bphCombo->setCurrentIndex(bphIndex);
+
+    const int angleIndex = m_liftAngleCombo->findData(
+        settings.value(QStringLiteral("analysis/liftAngle"), 52.0).toDouble());
+    if (angleIndex >= 0)
+        m_liftAngleCombo->setCurrentIndex(angleIndex);
+
+    const QString device = settings.value(
+        QStringLiteral("audio/lastDevice")).toString();
+    const int deviceIndex = m_deviceCombo->findText(device);
+    if (deviceIndex >= 0)
+        m_deviceCombo->setCurrentIndex(deviceIndex);
+
+    m_advancedPositionsCheck->setChecked(
+        settings.value(QStringLiteral("session/sixPositions"), false).toBool());
+}
+
+void MainWindow::saveSettings() const
+{
+    QSettings settings;
+    settings.setValue(QStringLiteral("ui/geometry"), saveGeometry());
+    settings.setValue(QStringLiteral("analysis/bph"), m_bphCombo->currentData());
+    settings.setValue(
+        QStringLiteral("analysis/liftAngle"), m_liftAngleCombo->currentData());
+    settings.setValue(
+        QStringLiteral("audio/lastDevice"), m_deviceCombo->currentText());
+    settings.setValue(
+        QStringLiteral("session/sixPositions"),
+        m_advancedPositionsCheck->isChecked());
 }
 
 void MainWindow::setStatus(const QString& text, bool warning)

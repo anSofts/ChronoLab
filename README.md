@@ -12,7 +12,7 @@ watches. It listens to an acoustic or contact sensor and estimates:
 The project is intentionally built from scratch. No source code from `tg` is
 included.
 
-> **Current status:** 0.1 engineering preview. Rate, BPH and beat-error
+> **Current status:** 0.2 engineering preview. Rate, BPH and beat-error
 > detection are implemented and tested with synthetic signals. Amplitude is
 > visible in the interface but intentionally withheld until the acoustic phase
 > detector has been validated against real recordings and a reference
@@ -29,6 +29,26 @@ ChronoLab uses the raw audio inputs exposed by the operating system:
 
 The USB sensor sold under ASIN `B0DZN3HXR8` is expected to appear as a normal
 USB microphone and is the first target device.
+
+## Test without a microphone
+
+Choose **Simulatore** in the main window and configure BPH, rate, beat error,
+noise, duration and optional missed impulses. The generated laboratory signal
+passes through the same analyzer used for USB and WAV input.
+
+The simulator validates the software workflow; it does not replace calibration
+against physical watches and a reference instrument.
+
+## Positional sessions
+
+The default session matches the target holder and records two supported
+positions:
+
+- dial up (`Quadrante in alto`);
+- caseback up (`Fondello in alto`).
+
+An optional six-position mode can be enabled for users with another holder.
+It is disabled by default and is not required to complete a session.
 
 ## Build with Qt Creator on Windows
 
@@ -50,7 +70,8 @@ The analyzer tests can be built without Qt:
 
 ```bash
 g++ -std=c++20 -O2 -Isrc \
-    src/core/TimegrapherAnalyzer.cpp tests/test_analyzer.cpp \
+    src/core/SyntheticWatch.cpp src/core/TimegrapherAnalyzer.cpp \
+    tests/test_analyzer.cpp \
     -o chronolab_core_tests
 ./chronolab_core_tests
 ```

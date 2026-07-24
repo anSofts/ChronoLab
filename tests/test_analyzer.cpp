@@ -1,11 +1,10 @@
 #include "core/TimegrapherAnalyzer.hpp"
+#include "core/SyntheticWatch.hpp"
 
-#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <string>
-#include <vector>
 
 namespace {
 
@@ -28,49 +27,15 @@ std::vector<float> synthesizeWatch(
     double noiseLevel = 0.004,
     int dropEvery = 0)
 {
-    const std::size_t count = static_cast<std::size_t>(
-        std::lround(sampleRate * durationSeconds));
-    std::vector<float> samples(count, 0.0f);
-
-    unsigned int randomState = 0xC0FFEEu;
-    for (float& sample : samples) {
-        randomState = 1664525u * randomState + 1013904223u;
-        const double unit = static_cast<double>((randomState >> 8) & 0xFFFFu) / 65535.0;
-        sample = static_cast<float>((unit * 2.0 - 1.0) * noiseLevel);
-    }
-
-    const double measuredBph =
-        nominalBph * (1.0 + rateSecondsPerDay / 86400.0);
-    const double meanPeriod = 3600.0 / measuredBph;
-    const double halfBeatError = beatErrorMilliseconds / 2000.0;
-
-    double eventTime = 0.45;
-    long long beat = 0;
-    while (eventTime < durationSeconds - 0.1) {
-        if (dropEvery <= 0 || beat % dropEvery != dropEvery - 1) {
-            const std::size_t center = static_cast<std::size_t>(
-                std::lround(eventTime * sampleRate));
-
-            // A damped high-frequency burst approximates the contact pickup's
-            // escapement transient and exercises the envelope detector.
-            const int burstLength = static_cast<int>(sampleRate * 0.006);
-            for (int offset = 0; offset < burstLength; ++offset) {
-                const std::size_t index = center + static_cast<std::size_t>(offset);
-                if (index >= samples.size())
-                    break;
-                const double time = static_cast<double>(offset) / sampleRate;
-                const double burst = 0.72 * std::exp(-time * 600.0)
-                    * std::sin(2.0 * 3.14159265358979323846 * 1450.0 * time);
-                samples[index] += static_cast<float>(burst);
-            }
-        }
-
-        const double interval = meanPeriod
-            + ((beat & 1LL) == 0 ? halfBeatError : -halfBeatError);
-        eventTime += interval;
-        ++beat;
-    }
-    return samples;
+    chronolab::SyntheticWatchConfig config;
+    config.sampleRate = sampleRate;
+    config.durationSeconds = durationSeconds;
+    config.nominalBph = nominalBph;
+    config.rateSecondsPerDay = rateSecondsPerDay;
+    config.beatErrorMilliseconds = beatErrorMilliseconds;
+    config.noiseLevel = noiseLevel;
+    config.dropEvery = dropEvery;
+    return chronolab::SyntheticWatch::generate(config);
 }
 
 void testKnownRate(
