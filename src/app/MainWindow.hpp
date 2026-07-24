@@ -21,6 +21,7 @@ namespace chronolab {
 
 class SignalPlotWidget;
 class TimegrapherPlotWidget;
+class LanguageManager;
 
 struct AnalysisJobResult {
     quint64 generation = 0;
@@ -31,7 +32,7 @@ class MainWindow final : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    explicit MainWindow(LanguageManager& languageManager, QWidget* parent = nullptr);
     ~MainWindow() override;
 
 private slots:
@@ -50,6 +51,7 @@ private slots:
     void capturePosition();
     void showPositionSummary();
     void configurePositionMode(bool advanced);
+    void changeLanguage(int index);
 
 private:
     QWidget* createMetricCard(
@@ -61,12 +63,14 @@ private:
     void applyTheme();
     void updateMeasurementUi(const AnalysisResult& result);
     AnalyzerConfig analyzerConfig() const;
+    QString translatedAnalysisStatus(const std::string& status) const;
     void setStatus(const QString& text, bool warning = false);
     void loadSettings();
     void saveSettings() const;
     void updateSessionButton();
     static QStringList positionNames();
 
+    LanguageManager& m_languageManager;
     AudioCapture m_capture;
     AnalysisResult m_lastResult;
     QVector<float> m_audioBuffer;
@@ -76,6 +80,7 @@ private:
     QComboBox* m_bphCombo = nullptr;
     QComboBox* m_liftAngleCombo = nullptr;
     QComboBox* m_positionCombo = nullptr;
+    QComboBox* m_languageCombo = nullptr;
     QCheckBox* m_advancedPositionsCheck = nullptr;
     QPushButton* m_startButton = nullptr;
     QPushButton* m_saveWavButton = nullptr;

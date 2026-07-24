@@ -1,5 +1,6 @@
 #include "app/MainWindow.hpp"
 
+#include "app/LanguageManager.hpp"
 #include "audio/WavFile.hpp"
 #include "core/SyntheticWatch.hpp"
 #include "widgets/SignalPlotWidget.hpp"
@@ -53,8 +54,9 @@ QPushButton* makeButton(const QString& text, const QString& objectName = {})
 
 } // namespace
 
-MainWindow::MainWindow(QWidget* parent)
+MainWindow::MainWindow(LanguageManager& languageManager, QWidget* parent)
     : QMainWindow(parent)
+    , m_languageManager(languageManager)
     , m_capture(this)
 {
     buildInterface();
@@ -93,9 +95,8 @@ MainWindow::MainWindow(QWidget* parent)
                 else
                     m_analysisTimer->stop();
             });
-
     onDevicesChanged(m_capture.inputDeviceNames());
-    setWindowTitle(tr("ChronoLab 0.2 — Open Timegrapher"));
+    setWindowTitle(tr("ChronoLab 0.3 — Open Timegrapher"));
     resize(1360, 850);
     setMinimumSize(1024, 680);
     loadSettings();
@@ -107,6 +108,16 @@ MainWindow::~MainWindow()
     saveSettings();
     if (m_analysisWatcher && m_analysisWatcher->isRunning())
         m_analysisWatcher->waitForFinished();
+}
+
+void MainWindow::changeLanguage(int index)
+{
+    if (index < 0)
+        return;
+
+    const QString code = m_languageCombo->itemData(index).toString();
+    m_languageManager.setLanguage(code);
+    setStatus(tr("La modifica avrà effetto al prossimo avvio."));
 }
 
 QWidget* MainWindow::createMetricCard(
@@ -164,11 +175,25 @@ void MainWindow::buildInterface()
     header->addLayout(brandColumn);
     header->addStretch();
 
+    auto* languageLabel = new QLabel(tr("LINGUA"));
+    languageLabel->setObjectName(QStringLiteral("controlLabel"));
+    m_languageCombo = new QComboBox;
+    m_languageCombo->setMinimumWidth(112);
+    for (const auto& language : LanguageManager::availableLanguages())
+        m_languageCombo->addItem(language.nativeName, language.code);
+    const int languageIndex =
+        m_languageCombo->findData(m_languageManager.currentLanguage());
+    if (languageIndex >= 0)
+        m_languageCombo->setCurrentIndex(languageIndex);
+
     auto* openButton = makeButton(tr("Apri WAV"));
     auto* simulationButton = makeButton(tr("Simulatore"));
     m_saveWavButton = makeButton(tr("Salva WAV"));
     m_exportButton = makeButton(tr("Esporta CSV"));
     auto* clearButton = makeButton(tr("Nuova sessione"));
+    header->addWidget(languageLabel);
+    header->addWidget(m_languageCombo);
+    header->addSpacing(6);
     header->addWidget(openButton);
     header->addWidget(simulationButton);
     header->addWidget(m_saveWavButton);
@@ -176,6 +201,8 @@ void MainWindow::buildInterface()
     header->addWidget(clearButton);
     root->addLayout(header);
 
+    connect(m_languageCombo, &QComboBox::currentIndexChanged,
+            this, &MainWindow::changeLanguage);
     connect(openButton, &QPushButton::clicked, this, &MainWindow::openWav);
     connect(simulationButton, &QPushButton::clicked,
             this, &MainWindow::runSimulation);
@@ -329,7 +356,7 @@ void MainWindow::buildInterface()
     root->addWidget(splitter, 1);
 
     auto* footer = new QLabel(
-        tr("ChronoLab 0.2 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
+        tr("ChronoLab 0.3 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
     footer->setObjectName(QStringLiteral("footer"));
     root->addWidget(footer, 0, Qt::AlignRight);
 
@@ -440,12 +467,11 @@ void MainWindow::toggleCapture()
 
 void MainWindow::onDevicesChanged(const QStringList& devices)
 {
-    const QString previous = m_deviceCombo->currentText();
+    const int previous = m_deviceCombo->currentIndex();
     m_deviceCombo->clear();
     m_deviceCombo->addItems(devices);
-    const int oldIndex = m_deviceCombo->findText(previous);
-    if (oldIndex >= 0)
-        m_deviceCombo->setCurrentIndex(oldIndex);
+    if (previous >= 0 && previous < m_deviceCombo->count())
+        m_deviceCombo->setCurrentIndex(previous);
 
     m_startButton->setEnabled(!devices.isEmpty());
     if (devices.isEmpty())
@@ -479,6 +505,25 @@ void MainWindow::updateLevel(float peak, float rms)
             "QProgressBar::chunk { background:#f08c75; border-radius:3px; }"));
     else
         m_levelMeter->setStyleSheet({});
+}
+
+QString MainWindow::translatedAnalysisStatus(const std::string& status) const
+{
+    if (status == "Servono almeno due secondi di audio valido")
+        return tr("Servono almeno due secondi di audio valido");
+    if (status == "Segnale insufficiente: avvicinare o riposizionare il sensore")
+        return tr("Segnale insufficiente: avvicinare o riposizionare il sensore");
+    if (status == "Battito non identificato con sufficiente affidabilità")
+        return tr("Battito non identificato con sufficiente affidabilità");
+    if (status == "Troppi impulsi scartati: controllare il contatto del sensore")
+        return tr("Troppi impulsi scartati: controllare il contatto del sensore");
+    if (status == "Impossibile stimare la marcia")
+        return tr("Impossibile stimare la marcia");
+    if (status == "Misurazione stabile")
+        return tr("Misurazione stabile");
+    if (status == "Misurazione acquisita, qualità da migliorare")
+        return tr("Misurazione acquisita, qualità da migliorare");
+    return QString::fromStdString(status);
 }
 
 AnalyzerConfig MainWindow::analyzerConfig() const
@@ -545,7 +590,7 @@ void MainWindow::updateMeasurementUi(const AnalysisResult& result)
         m_bphValue->setText(QStringLiteral("—"));
         m_confidenceValue->setText(QStringLiteral("0"));
         if (!result.status.empty())
-            setStatus(QString::fromStdString(result.status), true);
+            setStatus(translatedAnalysisStatus(result.status), true);
         return;
     }
 
@@ -572,7 +617,7 @@ void MainWindow::updateMeasurementUi(const AnalysisResult& result)
 
     setStatus(
         tr("%1 · SNR %2 dB · jitter %3 ms · %4 impulsi validi")
-            .arg(QString::fromStdString(result.status))
+            .arg(translatedAnalysisStatus(result.status))
             .arg(result.signalToNoiseDb, 0, 'f', 1)
             .arg(result.intervalJitterMilliseconds, 0, 'f', 2)
             .arg(result.events.size()),
@@ -949,8 +994,14 @@ void MainWindow::loadSettings()
     const QString device = settings.value(
         QStringLiteral("audio/lastDevice")).toString();
     const int deviceIndex = m_deviceCombo->findText(device);
-    if (deviceIndex >= 0)
+    const int savedDeviceIndex = settings.value(
+        QStringLiteral("audio/lastDeviceIndex"), -1).toInt();
+    if (deviceIndex >= 0) {
         m_deviceCombo->setCurrentIndex(deviceIndex);
+    } else if (savedDeviceIndex >= 0
+               && savedDeviceIndex < m_deviceCombo->count()) {
+        m_deviceCombo->setCurrentIndex(savedDeviceIndex);
+    }
 
     m_advancedPositionsCheck->setChecked(
         settings.value(QStringLiteral("session/sixPositions"), false).toBool());
@@ -965,6 +1016,8 @@ void MainWindow::saveSettings() const
         QStringLiteral("analysis/liftAngle"), m_liftAngleCombo->currentData());
     settings.setValue(
         QStringLiteral("audio/lastDevice"), m_deviceCombo->currentText());
+    settings.setValue(
+        QStringLiteral("audio/lastDeviceIndex"), m_deviceCombo->currentIndex());
     settings.setValue(
         QStringLiteral("session/sixPositions"),
         m_advancedPositionsCheck->isChecked());

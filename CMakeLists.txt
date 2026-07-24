@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(ChronoLab
-    VERSION 0.2.0
+    VERSION 0.3.0
     DESCRIPTION "Open-source mechanical watch timegrapher"
     LANGUAGES CXX
 )
@@ -32,7 +32,10 @@ if(CHRONOLAB_BUILD_APP)
     qt_standard_project_setup()
 
     qt_add_executable(ChronoLab
+        resources.qrc
         src/main.cpp
+        src/app/LanguageManager.cpp
+        src/app/LanguageManager.hpp
         src/app/MainWindow.cpp
         src/app/MainWindow.hpp
         src/audio/AudioCapture.cpp
@@ -74,4 +77,13 @@ if(CHRONOLAB_BUILD_TESTS)
     )
     target_link_libraries(chronolab_core_tests PRIVATE chronolab_core)
     add_test(NAME chronolab_core_tests COMMAND chronolab_core_tests)
+
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(
+            NAME chronolab_translation_catalogs
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_translations.py"
+        )
+    endif()
 endif()

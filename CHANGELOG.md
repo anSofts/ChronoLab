@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 — MULTI5
+
+- Added complete Italian, English, French, German and Spanish interfaces.
+- Added an in-app language selector whose choice is applied at the next launch.
+- Added automatic first-launch language detection and persistent selection.
+- Embedded human-editable UTF-8 JSON translation catalogs in the executable.
+- Localized live audio states, DSP analysis results, WAV errors, plots,
+  simulator, positional sessions and export dialogs.
+- Kept translation infrastructure independent of Qt LinguistTools so the
+  existing Qt 6.5+ build requirements remain unchanged.
+
 ## 0.2.0 — Test without hardware
 
 - Added configurable deterministic watch-signal simulator.

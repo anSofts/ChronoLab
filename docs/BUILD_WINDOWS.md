@@ -11,7 +11,9 @@
 4. Select the Desktop Qt 6.9.2 kit and configure.
 5. In the target selector choose `ChronoLab`, not
    `chronolab_core_tests`.
-6. Build and run.
+6. Under **Projects > Deploy Settings**, keep
+   **Install Application Manager Package** disabled.
+7. Build and run.
 
 The application can be tested immediately without the USB sensor by selecting
 **Simulatore**. Start with 21,600 A/h, +8 s/day and 0.40 ms.
@@ -32,11 +34,13 @@ $deploy = "C:\path\to\ChronoLab\deploy"
 
 New-Item -ItemType Directory -Force $deploy
 Copy-Item "$build\ChronoLab.exe" $deploy
-windeployqt --release --no-translations "$deploy\ChronoLab.exe"
+windeployqt --release "$deploy\ChronoLab.exe"
 ```
 
 The exact build directory is shown by Qt Creator under **Projects > Build
-Settings**.
+Settings**. Do not pass `--no-translations`: ChronoLab's five application
+catalogs are embedded, while the Qt translation files deployed by
+`windeployqt` localize standard buttons and system dialogs.
 
 ## Target USB sensor checklist
 

@@ -1,6 +1,6 @@
 # Analyzer design
 
-ChronoLab 0.2 uses a deterministic signal-processing pipeline:
+ChronoLab 0.3 uses a deterministic signal-processing pipeline:
 
 1. remove DC and low-frequency handling noise with a first-order high-pass;
 2. generate a short RMS envelope;

@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/i18n">
+        <file alias="chronolab_it.json">translations/chronolab_it.json</file>
+        <file alias="chronolab_en.json">translations/chronolab_en.json</file>
+        <file alias="chronolab_fr.json">translations/chronolab_fr.json</file>
+        <file alias="chronolab_de.json">translations/chronolab_de.json</file>
+        <file alias="chronolab_es.json">translations/chronolab_es.json</file>
+    </qresource>
+</RCC>

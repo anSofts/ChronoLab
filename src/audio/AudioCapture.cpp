@@ -57,7 +57,7 @@ QString AudioCapture::activeFormatDescription() const
     case QAudioFormat::Int16: formatName = QStringLiteral("Int16"); break;
     case QAudioFormat::Int32: formatName = QStringLiteral("Int32"); break;
     case QAudioFormat::Float: formatName = QStringLiteral("Float32"); break;
-    default: formatName = QStringLiteral("Sconosciuto"); break;
+    default: formatName = tr("Sconosciuto"); break;
     }
 
     return tr("%1 Hz · %2 canale/i · %3")

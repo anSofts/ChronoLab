@@ -12,7 +12,7 @@ watches. It listens to an acoustic or contact sensor and estimates:
 The project is intentionally built from scratch. No source code from `tg` is
 included.
 
-> **Current status:** 0.2 engineering preview. Rate, BPH and beat-error
+> **Current status:** 0.3 engineering preview. Rate, BPH and beat-error
 > detection are implemented and tested with synthetic signals. Amplitude is
 > visible in the interface but intentionally withheld until the acoustic phase
 > detector has been validated against real recordings and a reference
@@ -39,6 +39,25 @@ passes through the same analyzer used for USB and WAV input.
 The simulator validates the software workflow; it does not replace calibration
 against physical watches and a reference instrument.
 
+## MULTI5 interface
+
+ChronoLab includes five complete interface languages:
+
+- Italian;
+- English;
+- French;
+- German;
+- Spanish.
+
+Use the language selector in the header to choose the interface language.
+ChronoLab remembers the selection and applies it on every following launch. On
+first launch it follows the operating-system language when supported and
+otherwise falls back to Italian.
+
+Translations are stored as UTF-8 JSON catalogs under `translations/`, embedded
+in the executable and processed entirely offline. New translations can be
+contributed without changing the DSP core.
+
 ## Positional sessions
 
 The default session matches the target holder and records two supported
@@ -64,7 +83,7 @@ Steps:
 2. Select a Desktop Qt 6.x kit.
 3. Configure the project.
 4. Build the `ChronoLab` target.
-5. Run it and select the USB sensor under **Ingresso**.
+5. Run it, select your language and choose the USB sensor under **Ingresso**.
 
 The analyzer tests can be built without Qt:
 
