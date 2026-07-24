@@ -96,7 +96,7 @@ MainWindow::MainWindow(LanguageManager& languageManager, QWidget* parent)
                     m_analysisTimer->stop();
             });
     onDevicesChanged(m_capture.inputDeviceNames());
-    setWindowTitle(tr("ChronoLab 0.3.1 — Open Timegrapher"));
+    setWindowTitle(tr("ChronoLab 0.3.2 — Open Timegrapher"));
     resize(1360, 850);
     setMinimumSize(1024, 680);
     loadSettings();
@@ -262,7 +262,10 @@ void MainWindow::buildInterface()
     connect(helpButton, &QPushButton::clicked,
             this, &MainWindow::showAudioHelp);
     connect(m_bphCombo, &QComboBox::currentIndexChanged,
-            this, &MainWindow::analyzeBuffer);
+            this, [this]() {
+                m_measurementStabilizer.reset();
+                analyzeBuffer();
+            });
     connect(m_liftAngleCombo, &QComboBox::currentIndexChanged,
             this, &MainWindow::analyzeBuffer);
 
@@ -356,7 +359,7 @@ void MainWindow::buildInterface()
     root->addWidget(splitter, 1);
 
     auto* footer = new QLabel(
-        tr("ChronoLab 0.3.1 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
+        tr("ChronoLab 0.3.2 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
     footer->setObjectName(QStringLiteral("footer"));
     root->addWidget(footer, 0, Qt::AlignRight);
 
@@ -455,6 +458,7 @@ void MainWindow::toggleCapture()
 
     ++m_analysisGeneration;
     m_analysisPending = false;
+    m_measurementStabilizer.reset();
     m_audioBuffer.clear();
     m_lastResult = {};
     m_timegrapherPlot->clear();
@@ -567,7 +571,7 @@ void MainWindow::finishAnalysis()
 {
     const AnalysisJobResult job = m_analysisWatcher->result();
     if (job.generation == m_analysisGeneration) {
-        m_lastResult = job.result;
+        m_lastResult = m_measurementStabilizer.process(job.result);
         updateMeasurementUi(m_lastResult);
         m_timegrapherPlot->setAnalysis(m_lastResult);
         m_exportButton->setEnabled(m_lastResult.valid);
@@ -634,6 +638,7 @@ void MainWindow::openWav()
     m_capture.stop();
     ++m_analysisGeneration;
     m_analysisPending = false;
+    m_measurementStabilizer.reset();
     const WavData wav = WavFile::load(path);
     if (!wav.isValid()) {
         QMessageBox::critical(this, tr("WAV non leggibile"), wav.error);
@@ -729,6 +734,7 @@ void MainWindow::runSimulation()
     m_capture.stop();
     ++m_analysisGeneration;
     m_analysisPending = false;
+    m_measurementStabilizer.reset();
     m_audioBuffer.resize(static_cast<qsizetype>(generated.size()));
     std::copy(generated.begin(), generated.end(), m_audioBuffer.begin());
     m_sampleRate = config.sampleRate;
@@ -806,6 +812,7 @@ void MainWindow::clearSession()
     m_capture.stop();
     ++m_analysisGeneration;
     m_analysisPending = false;
+    m_measurementStabilizer.reset();
     m_audioBuffer.clear();
     m_sampleRate = 0;
     m_lastResult = {};

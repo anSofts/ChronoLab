@@ -44,3 +44,19 @@ Thirteen consecutive overlapping 18-second windows from the same WAV produced:
 The purpose of this fixture was to prove repeatable signal lock. More watches,
 positions, amplitudes and reference instruments are still required before
 claiming metrological accuracy.
+
+## 0.3.2 follow-up
+
+The original beat-error correlation added tick-to-tock and inverse
+tock-to-tick comparisons. Their opposite offsets could cancel and produce a
+false 0.00 ms result. Version 0.3.2 uses only the directional comparison.
+
+On the same thirteen windows it produced:
+
+- raw rate range: -10.29 to -10.80 s/day;
+- displayed median-filtered rate range: -10.30 to -10.58 s/day;
+- beat-error range: 0.95 to 0.98 ms;
+- no BPH changes, unlocks or rate spikes.
+
+The desktop layer now also withholds an isolated rate/BPH jump and requires
+three mutually coherent windows before treating a large change as real.

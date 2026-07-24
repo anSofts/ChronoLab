@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.2 — Temporal Guard
+
+- Fixed false 0.00 ms beat-error readings caused by symmetric full-cycle
+  correlation cancelling the tick/tock displacement.
+- Changed beat-error analysis to directional tick-to-tock correlation.
+- Added a five-window median stabilizer for displayed rate and beat error.
+- Rejects isolated large rate jumps and temporary BPH harmonic changes.
+- Accepts a genuinely changed measurement after three coherent confirmations.
+- Resets temporal history when starting a session, opening a WAV, running the
+  simulator or changing the selected BPH.
+- Added regression tests for isolated -500 s/day spikes and confirmed changes.
+- Revalidated the 30-second USB recording across thirteen overlapping windows.
+
 ## 0.3.1 — Real Signal Lock
 
 - Replaced peak-to-peak rate calculation with a long-baseline FFT

@@ -12,7 +12,7 @@ watches. It listens to an acoustic or contact sensor and estimates:
 The project is intentionally built from scratch. No source code from `tg` is
 included.
 
-> **Current status:** 0.3.1 real-signal preview. Rate, BPH and beat-error
+> **Current status:** 0.3.2 real-signal preview. Rate, BPH and beat-error
 > detection are tested with synthetic signals and the first recording from the
 > target USB contact microphone. Amplitude is visible in the interface but
 > intentionally withheld until its acoustic phase detector has been validated
@@ -117,7 +117,7 @@ USB sensor / WAV
 Qt Multimedia capture -> normalized mono samples
         |
         v
-C++20 DSP core -> correlation lock -> BPH / rate / beat error / quality
+C++20 DSP core -> correlation lock -> temporal guard -> BPH / rate / beat error / quality
         |
         v
 Qt Widgets UI -> strip trace / waveform / CSV / WAV

@@ -46,4 +46,15 @@ public:
     [[nodiscard]] static const std::vector<double>& standardBeatRates();
 };
 
+class MeasurementStabilizer {
+public:
+    [[nodiscard]] AnalysisResult process(const AnalysisResult& candidate);
+    void reset();
+
+private:
+    std::vector<AnalysisResult> m_history;
+    AnalysisResult m_pendingCandidate;
+    int m_pendingCount = 0;
+};
+
 } // namespace chronolab

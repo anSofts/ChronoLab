@@ -35,6 +35,17 @@ double percentile(std::vector<double> values, double fraction)
     return values[index];
 }
 
+double medianOfResults(
+    const std::vector<AnalysisResult>& results,
+    double AnalysisResult::*member)
+{
+    std::vector<double> values;
+    values.reserve(results.size());
+    for (const AnalysisResult& result : results)
+        values.push_back(result.*member);
+    return percentile(std::move(values), 0.50);
+}
+
 double circularDifference(double value, double reference, double period)
 {
     double difference = std::fmod(value - reference, period);
@@ -406,7 +417,11 @@ double estimateBeatError(
 
     for (int lag = lower; lag <= upper; ++lag) {
         double sum = 0.0;
-        for (int index = 0; index < profileSize; ++index) {
+        // Compare tick to tock in one direction only. Summing the complete
+        // folded cycle also adds the inverse tock-to-tick comparison; the two
+        // offsets then cancel and can create a false maximum at exactly
+        // 0.00 ms even when the escapement is asymmetric.
+        for (int index = 0; index < profileSize / 2; ++index) {
             sum += profile[index]
                 * profile[(index + lag) % profileSize];
         }
@@ -693,7 +708,7 @@ AnalysisResult TimegrapherAnalyzer::analyze(
     result.measuredBph = 3600.0 / secondsPerBeat;
     result.rateSecondsPerDay =
         (result.measuredBph / result.nominalBph - 1.0) * kSecondsPerDay;
-    result.beatErrorMilliseconds = estimateBeatError(
+    const double profileBeatError = estimateBeatError(
         pulse.samples, pulse.sampleRate, lock.cycleSamples);
 
     const std::vector<LockedEvent> lockedEvents =
@@ -712,6 +727,19 @@ AnalysisResult TimegrapherAnalyzer::analyze(
     }
     const double evenMedian = percentile(evenResiduals, 0.50);
     const double oddMedian = percentile(oddResiduals, 0.50);
+    const double eventBeatError =
+        std::abs(evenMedian - oddMedian) * 1000.0;
+
+    // The directional folded-profile correlation is insensitive to which
+    // internal resonance happens to be loudest. Event parity is only a
+    // conservative fallback for small offsets: on difficult microphones,
+    // changing resonances can move a transient edge by several milliseconds.
+    result.beatErrorMilliseconds = profileBeatError;
+    if (result.beatErrorMilliseconds < 0.08
+        && evenResiduals.size() >= 4 && oddResiduals.size() >= 4
+        && eventBeatError >= 0.08 && eventBeatError <= 2.5) {
+        result.beatErrorMilliseconds = eventBeatError;
+    }
 
     std::vector<double> correctedResiduals;
     correctedResiduals.reserve(lockedEvents.size());
@@ -766,6 +794,81 @@ AnalysisResult TimegrapherAnalyzer::analyze(
         ? "Misurazione stabile"
         : "Misurazione acquisita, qualità da migliorare";
     return result;
+}
+
+AnalysisResult MeasurementStabilizer::process(
+    const AnalysisResult& candidate)
+{
+    if (!candidate.valid) {
+        m_pendingCount = 0;
+        return candidate;
+    }
+
+    if (m_history.empty()) {
+        m_history.push_back(candidate);
+        return candidate;
+    }
+
+    const double referenceBph = m_history.back().nominalBph;
+    const double referenceRate =
+        medianOfResults(m_history, &AnalysisResult::rateSecondsPerDay);
+    constexpr double kMaximumInstantRateJump = 15.0;
+    constexpr double kPendingClusterTolerance = 10.0;
+    constexpr int kRequiredConfirmations = 3;
+
+    const bool harmonicChanged =
+        std::abs(candidate.nominalBph - referenceBph) > 1.0;
+    const bool rateJumped =
+        std::abs(candidate.rateSecondsPerDay - referenceRate)
+        > kMaximumInstantRateJump;
+
+    if (harmonicChanged || rateJumped) {
+        const bool continuesPendingCluster =
+            m_pendingCount > 0
+            && std::abs(
+                   candidate.nominalBph - m_pendingCandidate.nominalBph)
+                <= 1.0
+            && std::abs(
+                   candidate.rateSecondsPerDay
+                   - m_pendingCandidate.rateSecondsPerDay)
+                <= kPendingClusterTolerance;
+
+        if (continuesPendingCluster)
+            ++m_pendingCount;
+        else
+            m_pendingCount = 1;
+        m_pendingCandidate = candidate;
+
+        if (m_pendingCount < kRequiredConfirmations)
+            return m_history.back();
+
+        m_history.clear();
+        m_pendingCount = 0;
+    } else {
+        m_pendingCount = 0;
+    }
+
+    m_history.push_back(candidate);
+    if (m_history.size() > 5)
+        m_history.erase(m_history.begin());
+
+    AnalysisResult stabilized = candidate;
+    stabilized.rateSecondsPerDay =
+        medianOfResults(m_history, &AnalysisResult::rateSecondsPerDay);
+    stabilized.beatErrorMilliseconds =
+        medianOfResults(m_history, &AnalysisResult::beatErrorMilliseconds);
+    if (stabilized.nominalBph > 0.0) {
+        stabilized.measuredBph = stabilized.nominalBph
+            * (1.0 + stabilized.rateSecondsPerDay / kSecondsPerDay);
+    }
+    return stabilized;
+}
+
+void MeasurementStabilizer::reset()
+{
+    m_history.clear();
+    m_pendingCandidate = {};
+    m_pendingCount = 0;
 }
 
 } // namespace chronolab

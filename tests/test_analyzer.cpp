@@ -127,8 +127,48 @@ void testChangingRealWorldResonancesRemainLocked()
         require(std::abs(result.rateSecondsPerDay + 9.0) < 2.0,
                 "correlation lock allowed a real-world rate spike");
         require(std::abs(result.beatErrorMilliseconds - 0.90) < 0.25,
-                "beat error became unstable with changing resonances");
+                "beat error became unstable with changing resonances: got "
+                    + std::to_string(result.beatErrorMilliseconds));
     }
+}
+
+chronolab::AnalysisResult measurement(double rate, double beatError = 0.5)
+{
+    chronolab::AnalysisResult result;
+    result.valid = true;
+    result.nominalBph = 21600.0;
+    result.measuredBph = 21600.0 * (1.0 + rate / 86400.0);
+    result.rateSecondsPerDay = rate;
+    result.beatErrorMilliseconds = beatError;
+    result.confidence = 85.0;
+    result.status = "Misurazione stabile";
+    return result;
+}
+
+void testTransientRateOutlierIsRejected()
+{
+    chronolab::MeasurementStabilizer stabilizer;
+    static_cast<void>(stabilizer.process(measurement(8.0, 0.8)));
+    static_cast<void>(stabilizer.process(measurement(7.6, 0.9)));
+    const auto result = stabilizer.process(measurement(-500.0, 0.0));
+
+    require(result.valid, "a rejected outlier must preserve the stable result");
+    require(std::abs(result.rateSecondsPerDay - 7.6) < 1.0,
+            "single-window rate spike was allowed through");
+    require(result.beatErrorMilliseconds > 0.5,
+            "single-window beat-error collapse was allowed through");
+}
+
+void testPersistentRateChangeIsEventuallyAccepted()
+{
+    chronolab::MeasurementStabilizer stabilizer;
+    static_cast<void>(stabilizer.process(measurement(8.0)));
+    static_cast<void>(stabilizer.process(measurement(40.0)));
+    static_cast<void>(stabilizer.process(measurement(41.0)));
+    const auto result = stabilizer.process(measurement(39.0));
+
+    require(std::abs(result.rateSecondsPerDay - 39.0) < 1.0,
+            "a confirmed new measurement cluster was not accepted");
 }
 
 } // namespace
@@ -145,6 +185,8 @@ int main()
         testManualBph();
         testMissedBeats();
         testChangingRealWorldResonancesRemainLocked();
+        testTransientRateOutlierIsRejected();
+        testPersistentRateChangeIsEventuallyAccepted();
         testSilenceRejected();
     } catch (const TestFailure& failure) {
         std::cerr << "FAILED: " << failure.message << '\n';

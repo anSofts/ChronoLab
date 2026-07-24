@@ -1,6 +1,6 @@
 # Analyzer design
 
-ChronoLab 0.3.1 uses a deterministic signal-processing pipeline:
+ChronoLab 0.3.2 uses a deterministic signal-processing pipeline:
 
 1. generate an RMS envelope and adaptive transient candidates for BPH scoring;
 2. isolate the sharp escapement content with independent second-order filters;
@@ -8,10 +8,13 @@ ChronoLab 0.3.1 uses a deterministic signal-processing pipeline:
 4. calculate long-baseline autocorrelation with an internal radix-2 FFT;
 5. follow repeated cycle peaks and robustly combine their period estimates;
 6. reject the lock when correlation or median-deviation checks fail;
-7. fold complete tick/tock cycles with a trimmed mean and estimate beat error;
+7. fold complete tick/tock cycles with a trimmed mean and estimate beat error
+   using directional tick-to-tock correlation;
 8. place strip events using constant-fraction timing and a periodic phase lock;
 9. combine BPH fit, lock strength, period stability, SNR and jitter into
-   confidence.
+   confidence;
+10. median-filter consecutive overlapping measurements and require three
+    coherent confirmations before accepting a large rate or BPH change.
 
 Rate never comes from the loudest acoustic peak. A physical contact sensor
 produces several resonances for each escapement event, and their relative
@@ -44,7 +47,8 @@ case geometry or real escapement will behave.
 - `measured_bph = 7200 / correlated_tick_tock_cycle_seconds`
 - `rate_s_per_day = (measured_bph / nominal_bph - 1) * 86400`
 - beat error is the displacement of the tick/tock separation from the ideal
-  half-cycle, estimated on the robust folded waveform.
+  half-cycle, estimated with one-direction tick-to-tock correlation so the
+  inverse comparison cannot cancel the offset.
 
 ## Why amplitude is not enabled yet
 

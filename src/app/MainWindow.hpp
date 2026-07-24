@@ -73,6 +73,7 @@ private:
     LanguageManager& m_languageManager;
     AudioCapture m_capture;
     AnalysisResult m_lastResult;
+    MeasurementStabilizer m_measurementStabilizer;
     QVector<float> m_audioBuffer;
     int m_sampleRate = 0;
 
