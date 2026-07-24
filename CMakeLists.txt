@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(ChronoLab
-    VERSION 0.3.2
+    VERSION 0.3.3
     DESCRIPTION "Open-source mechanical watch timegrapher"
     LANGUAGES CXX
 )

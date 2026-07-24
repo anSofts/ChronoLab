@@ -11,6 +11,8 @@ struct SyntheticWatchConfig {
     double nominalBph = 21600.0;
     double rateSecondsPerDay = 8.0;
     double beatErrorMilliseconds = 0.4;
+    double liftAngleDegrees = 52.0;
+    double amplitudeDegrees = 280.0;
     double noiseLevel = 0.004;
     double signalLevel = 0.72;
     double impulseShapeVariation = 0.0;

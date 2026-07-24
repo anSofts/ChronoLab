@@ -18,7 +18,7 @@ void addBurst(
 {
     const auto center = static_cast<std::size_t>(std::max(
         0.0, std::round((eventTime + offsetSeconds) * sampleRate)));
-    const int length = std::max(4, static_cast<int>(sampleRate * 0.0055));
+    const int length = std::max(4, static_cast<int>(sampleRate * 0.0022));
     for (int offset = 0; offset < length; ++offset) {
         const std::size_t index = center + static_cast<std::size_t>(offset);
         if (index >= samples.size())
@@ -61,6 +61,9 @@ std::vector<float> SyntheticWatch::generate(const SyntheticWatchConfig& config)
     // the ideal midpoint. The two alternating intervals therefore differ by
     // twice the configured value.
     const double halfBeatError = config.beatErrorMilliseconds / 1000.0;
+    const double liftTime = 3600.0 * config.liftAngleDegrees
+        / (std::numbers::pi * config.nominalBph
+           * std::max(config.amplitudeDegrees, 1.0));
 
     double eventTime = 0.45;
     long long beat = 0;
@@ -93,15 +96,15 @@ std::vector<float> SyntheticWatch::generate(const SyntheticWatchConfig& config)
             // equivalence to a specific calibre.
             addBurst(samples, config.sampleRate, eventTime, 0.0000,
                      config.signalLevel
-                         * varied(0.58, firstPattern),
+                         * varied(0.62, firstPattern),
                      1720.0, 760.0);
-            addBurst(samples, config.sampleRate, eventTime, 0.0032,
+            addBurst(samples, config.sampleRate, eventTime, liftTime * 0.43,
                      config.signalLevel
-                         * varied(1.00, secondPattern),
+                         * varied(0.78, secondPattern),
                      1280.0, 590.0);
-            addBurst(samples, config.sampleRate, eventTime, 0.0071,
+            addBurst(samples, config.sampleRate, eventTime, liftTime,
                      config.signalLevel
-                         * varied(0.43, thirdPattern),
+                         * varied(1.00, thirdPattern),
                      2050.0, 860.0);
         }
 

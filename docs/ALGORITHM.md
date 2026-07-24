@@ -1,6 +1,6 @@
 # Analyzer design
 
-ChronoLab 0.3.2 uses a deterministic signal-processing pipeline:
+ChronoLab 0.3.3 uses a deterministic signal-processing pipeline:
 
 1. generate an RMS envelope and adaptive transient candidates for BPH scoring;
 2. isolate the sharp escapement content with independent second-order filters;
@@ -11,10 +11,14 @@ ChronoLab 0.3.2 uses a deterministic signal-processing pipeline:
 7. fold complete tick/tock cycles with a trimmed mean and estimate beat error
    using directional tick-to-tock correlation;
 8. place strip events using constant-fraction timing and a periodic phase lock;
-9. combine BPH fit, lock strength, period stability, SNR and jitter into
+9. build robust tick and tock profiles, identify their three lift impulses and
+   calculate amplitude only when both profiles agree;
+10. measure SNR on the escapement pulse band instead of broadband room audio;
+11. combine BPH fit, lock strength, period stability, SNR and jitter into
    confidence;
-10. median-filter consecutive overlapping measurements and require three
-    coherent confirmations before accepting a large rate or BPH change.
+12. median-filter consecutive overlapping measurements, smooth confidence and
+    require three coherent confirmations before accepting a large rate or BPH
+    change.
 
 Rate never comes from the loudest acoustic peak. A physical contact sensor
 produces several resonances for each escapement event, and their relative
@@ -49,18 +53,19 @@ case geometry or real escapement will behave.
 - beat error is the displacement of the tick/tock separation from the ideal
   half-cycle, estimated with one-direction tick-to-tock correlation so the
   inverse comparison cannot cancel the offset.
+- `amplitude_deg = 3600 * lift_angle_deg / (pi * nominal_bph * lift_time_s)`
+  where lift time is the robust first-to-third impulse separation.
 
-## Why amplitude is not enabled yet
+## Amplitude validation policy
 
-Balance amplitude cannot be inferred reliably from simple tick spacing. It
-requires identification of acoustic escapement phases and the movement's lift
-angle. Showing a value before this detector is validated would be misleading.
+Balance amplitude cannot be inferred from simple tick spacing. It requires
+identification of acoustic escapement phases and the movement's correct lift
+angle. ChronoLab calculates separate tick and tock profiles, requires three
+peaks in each, rejects physically implausible results and requires the two
+directions to agree within 60 degrees.
 
-The next implementation will:
+Future validation will:
 
-- segment unlock, impulse and drop features inside each beat;
-- reject beats with ambiguous phase structure;
-- calculate amplitude only with a known lift angle;
 - compare results against a commercial reference instrument over multiple
   movements, amplitudes and positions.
 

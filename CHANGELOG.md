@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.3 — Quiet Confidence and Amplitude
+
+- Calculates diagnostic SNR in the escapement pulse band instead of allowing
+  low-frequency room noise to dominate the quality indicator.
+- Median-filters SNR and jitter over five overlapping analysis windows.
+- Adds exponential confidence smoothing so the percentage changes gradually.
+- Reduces broadband SNR weight and gives periodic lock strength more weight.
+- Detects robust three-phase tick and tock profiles independently.
+- Enables amplitude when both profiles produce physically plausible,
+  mutually consistent values for the configured lift angle.
+- Adds configurable known amplitude to the deterministic simulator.
+- Adds regression tests for amplitude and confidence-display stability.
+
 ## 0.3.2 — Temporal Guard
 
 - Fixed false 0.00 ms beat-error readings caused by symmetric full-cycle

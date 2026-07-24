@@ -6,18 +6,18 @@ watches. It listens to an acoustic or contact sensor and estimates:
 - beat frequency (automatic or manual);
 - rate in seconds per day;
 - beat error;
+- balance amplitude for a configured lift angle;
 - signal-to-noise ratio, interval jitter and measurement confidence;
 - a traditional time-strip trace.
 
 The project is intentionally built from scratch. No source code from `tg` is
 included.
 
-> **Current status:** 0.3.2 real-signal preview. Rate, BPH and beat-error
-> detection are tested with synthetic signals and the first recording from the
-> target USB contact microphone. Amplitude is visible in the interface but
-> intentionally withheld until its acoustic phase detector has been validated
-> over multiple movements and positions. ChronoLab prefers an honest ellipsis
-> to a convincing fake number.
+> **Current status:** 0.3.3 real-signal preview. Rate, BPH, beat-error and
+> amplitude detection are tested with synthetic signals and the first recording from the
+> target USB contact microphone. Amplitude is displayed only when both
+> tick/tock profiles expose three coherent lift impulses; ambiguous signals
+> retain an honest ellipsis instead of a convincing fake number.
 
 ## Supported inputs
 
@@ -34,8 +34,8 @@ USB microphone and is the first target device.
 ## Test without a microphone
 
 Choose **Simulatore** in the main window and configure BPH, rate, beat error,
-noise, duration and optional missed impulses. The generated laboratory signal
-passes through the same analyzer used for USB and WAV input.
+amplitude, noise, duration and optional missed impulses. The generated
+laboratory signal passes through the same analyzer used for USB and WAV input.
 
 The simulator validates the software workflow; it does not replace calibration
 against physical watches and a reference instrument.
@@ -129,7 +129,7 @@ and reusable by future ESP32 or command-line frontends.
 ## Roadmap
 
 - Validate the detector with recordings from the target USB sensor.
-- Add unlock/impulse/drop phase detection and amplitude.
+- Validate and refine amplitude over multiple movements and positions.
 - Add movement profiles and lift-angle database.
 - Add guided six-position sessions and before/after comparisons.
 - Add long-term stability plots and PDF reports.

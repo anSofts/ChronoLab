@@ -1,6 +1,7 @@
 #include "core/TimegrapherAnalyzer.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <limits>
@@ -43,7 +44,11 @@ double medianOfResults(
     values.reserve(results.size());
     for (const AnalysisResult& result : results)
         values.push_back(result.*member);
-    return percentile(std::move(values), 0.50);
+    std::sort(values.begin(), values.end());
+    const std::size_t middle = values.size() / 2;
+    if ((values.size() & 1U) != 0U)
+        return values[middle];
+    return (values[middle - 1] + values[middle]) / 2.0;
 }
 
 double circularDifference(double value, double reference, double period)
@@ -551,6 +556,231 @@ std::vector<LockedEvent> lockEvents(
     return result;
 }
 
+double bandLimitedSignalToNoiseDb(const std::vector<double>& pulseSignal)
+{
+    if (pulseSignal.empty())
+        return 0.0;
+
+    std::vector<double> sample;
+    const std::size_t stride =
+        std::max<std::size_t>(1, pulseSignal.size() / 12000);
+    sample.reserve(pulseSignal.size() / stride + 1);
+    for (std::size_t i = 0; i < pulseSignal.size(); i += stride)
+        sample.push_back(pulseSignal[i]);
+
+    const double noiseFloor = percentile(sample, 0.50);
+    const double pulseLevel = percentile(std::move(sample), 0.98);
+    return 20.0 * std::log10(
+        std::max(pulseLevel, 1.0e-9)
+        / std::max(noiseFloor, 1.0e-9));
+}
+
+struct AmplitudeEstimate {
+    bool valid = false;
+    double degrees = 0.0;
+};
+
+AmplitudeEstimate estimateAmplitude(
+    const std::vector<double>& envelope,
+    int sampleRate,
+    const std::vector<LockedEvent>& lockedEvents,
+    double nominalBph,
+    double liftAngleDegrees)
+{
+    AmplitudeEstimate result;
+    if (envelope.empty() || sampleRate <= 0 || nominalBph <= 0.0
+        || liftAngleDegrees < 20.0 || liftAngleDegrees > 80.0) {
+        return result;
+    }
+
+    constexpr double kMinimumPlausibleAmplitude = 120.0;
+    constexpr double kMaximumPlausibleAmplitude = 380.0;
+    const double formulaNumerator = 3600.0 * liftAngleDegrees
+        / (std::numbers::pi * nominalBph);
+    const double minimumLiftTime =
+        formulaNumerator / kMaximumPlausibleAmplitude;
+    const double maximumLiftTime =
+        formulaNumerator / kMinimumPlausibleAmplitude;
+    const double beatPeriod = 3600.0 / nominalBph;
+    const double preSeconds =
+        std::min(beatPeriod * 0.40, maximumLiftTime + 0.006);
+    const double postSeconds = preSeconds;
+    const int preSamples =
+        static_cast<int>(std::ceil(preSeconds * sampleRate));
+    const int postSamples =
+        static_cast<int>(std::ceil(postSeconds * sampleRate));
+    const int profileSize = preSamples + postSamples + 1;
+
+    struct Window {
+        std::size_t center = 0;
+        double baseline = 0.0;
+        double scale = 0.0;
+    };
+    std::array<std::vector<Window>, 2> windows;
+    for (const LockedEvent& event : lockedEvents) {
+        const auto center = static_cast<long long>(
+            std::llround(event.timeSeconds * sampleRate));
+        if (center < preSamples
+            || center + postSamples >= static_cast<long long>(envelope.size())) {
+            continue;
+        }
+
+        std::vector<double> local;
+        local.reserve(static_cast<std::size_t>(profileSize));
+        for (int offset = -preSamples; offset <= postSamples; ++offset) {
+            local.push_back(
+                envelope[static_cast<std::size_t>(center + offset)]);
+        }
+        const double baseline = percentile(local, 0.10);
+        const double high = percentile(std::move(local), 0.98);
+        const double scale = high - baseline;
+        if (scale <= std::max(1.0e-8, baseline * 0.30))
+            continue;
+
+        windows[static_cast<std::size_t>(event.index & 1LL)].push_back({
+            static_cast<std::size_t>(center), baseline, scale
+        });
+    }
+
+    std::array<double, 2> parityAmplitude {};
+    std::array<bool, 2> parityValid {};
+    for (std::size_t parity = 0; parity < windows.size(); ++parity) {
+        if (windows[parity].size() < 6)
+            continue;
+
+        std::vector<double> profile(
+            static_cast<std::size_t>(profileSize));
+        std::vector<double> bin;
+        bin.reserve(windows[parity].size());
+        for (int index = 0; index < profileSize; ++index) {
+            bin.clear();
+            const int relative = index - preSamples;
+            for (const Window& window : windows[parity]) {
+                const double value =
+                    envelope[static_cast<std::size_t>(
+                        static_cast<long long>(window.center) + relative)];
+                bin.push_back(
+                    std::max(0.0, value - window.baseline)
+                    / window.scale);
+            }
+            profile[static_cast<std::size_t>(index)] =
+                percentile(bin, 0.50);
+        }
+
+        const int smoothingRadius =
+            std::max(1, static_cast<int>(std::lround(sampleRate * 0.00020)));
+        std::vector<double> smooth(profile.size());
+        std::vector<double> prefix(profile.size() + 1);
+        for (int index = 0; index < profileSize; ++index) {
+            prefix[static_cast<std::size_t>(index + 1)] =
+                prefix[static_cast<std::size_t>(index)]
+                + profile[static_cast<std::size_t>(index)];
+        }
+        for (int index = 0; index < profileSize; ++index) {
+            const int lower = std::max(0, index - smoothingRadius);
+            const int upper =
+                std::min(profileSize - 1, index + smoothingRadius);
+            const double sum =
+                prefix[static_cast<std::size_t>(upper + 1)]
+                - prefix[static_cast<std::size_t>(lower)];
+            const int count = upper - lower + 1;
+            smooth[static_cast<std::size_t>(index)] =
+                count > 0 ? sum / count : 0.0;
+        }
+
+        const double profileMaximum =
+            *std::max_element(smooth.begin(), smooth.end());
+        if (profileMaximum <= 0.0)
+            continue;
+
+        std::vector<int> peakCandidates;
+        for (int index = 1; index + 1 < profileSize; ++index) {
+            if (smooth[static_cast<std::size_t>(index)]
+                    >= profileMaximum * 0.08
+                && smooth[static_cast<std::size_t>(index)]
+                    >= smooth[static_cast<std::size_t>(index - 1)]
+                && smooth[static_cast<std::size_t>(index)]
+                    > smooth[static_cast<std::size_t>(index + 1)]) {
+                peakCandidates.push_back(index);
+            }
+        }
+
+        std::sort(
+            peakCandidates.begin(), peakCandidates.end(),
+            [&smooth](int left, int right) {
+                return smooth[static_cast<std::size_t>(left)]
+                    > smooth[static_cast<std::size_t>(right)];
+            });
+        const int minimumPeakDistance =
+            std::max(2, static_cast<int>(std::lround(sampleRate * 0.0012)));
+        std::vector<int> peaks;
+        for (const int candidate : peakCandidates) {
+            const bool separated = std::all_of(
+                peaks.begin(), peaks.end(),
+                [candidate, minimumPeakDistance](int accepted) {
+                    return std::abs(candidate - accepted)
+                        >= minimumPeakDistance;
+                });
+            if (separated)
+                peaks.push_back(candidate);
+        }
+        if (peaks.size() < 3)
+            continue;
+
+        std::sort(peaks.begin(), peaks.end());
+        int firstPeak = -1;
+        int thirdPeak = -1;
+        double bestScore = -1.0;
+        for (std::size_t first = 0; first + 2 < peaks.size(); ++first) {
+            for (std::size_t third = first + 2; third < peaks.size(); ++third) {
+                const double duration =
+                    static_cast<double>(peaks[third] - peaks[first])
+                    / sampleRate;
+                if (duration < minimumLiftTime || duration > maximumLiftTime)
+                    continue;
+
+                double intermediateStrength = 0.0;
+                for (std::size_t middle = first + 1; middle < third; ++middle) {
+                    intermediateStrength = std::max(
+                        intermediateStrength,
+                        smooth[static_cast<std::size_t>(peaks[middle])]);
+                }
+
+                const double score =
+                    smooth[static_cast<std::size_t>(peaks[first])]
+                    + smooth[static_cast<std::size_t>(peaks[third])]
+                    + 0.60 * intermediateStrength;
+                if (score > bestScore) {
+                    bestScore = score;
+                    firstPeak = peaks[first];
+                    thirdPeak = peaks[third];
+                }
+            }
+        }
+        if (firstPeak < 0 || thirdPeak < 0)
+            continue;
+
+        const double liftTime =
+            static_cast<double>(thirdPeak - firstPeak) / sampleRate;
+        const double amplitude = formulaNumerator / liftTime;
+        if (amplitude < kMinimumPlausibleAmplitude
+            || amplitude > kMaximumPlausibleAmplitude) {
+            continue;
+        }
+        parityAmplitude[parity] = amplitude;
+        parityValid[parity] = true;
+    }
+
+    if (!parityValid[0] || !parityValid[1]
+        || std::abs(parityAmplitude[0] - parityAmplitude[1]) > 60.0) {
+        return result;
+    }
+
+    result.degrees = (parityAmplitude[0] + parityAmplitude[1]) / 2.0;
+    result.valid = true;
+    return result;
+}
+
 } // namespace
 
 const std::vector<double>& TimegrapherAnalyzer::standardBeatRates()
@@ -617,17 +847,13 @@ AnalysisResult TimegrapherAnalyzer::analyze(
     for (const double value : noiseSample)
         deviations.push_back(std::abs(value - median));
     const double mad = percentile(std::move(deviations), 0.50);
-    const double highLevel = percentile(noiseSample, 0.98);
     const double threshold = median
         + std::max(
             config.detectionSensitivity * 1.4826 * mad,
             median * 1.8 + 1.0e-7);
 
-    result.signalToNoiseDb = 20.0 * std::log10(
-        std::max(highLevel, 1.0e-9) / std::max(median, 1.0e-9));
-
     const int refractorySamples =
-        std::max(1, static_cast<int>(std::lround(sampleRate * 0.028)));
+        std::max(1, static_cast<int>(std::lround(sampleRate * 0.040)));
     std::vector<double> eventTimes;
     std::vector<double> eventStrengths;
 
@@ -692,6 +918,8 @@ AnalysisResult TimegrapherAnalyzer::analyze(
     }
 
     const PulseSignal pulse = makePulseSignal(samples, sampleRate);
+    result.signalToNoiseDb =
+        bandLimitedSignalToNoiseDb(pulse.samples);
     const std::vector<double> pulseCorrelation =
         autocorrelation(pulse.samples);
     const PeriodLock lock =
@@ -768,10 +996,19 @@ AnalysisResult TimegrapherAnalyzer::analyze(
             std::sqrt(squared / correctedResiduals.size()) * 1000.0;
     }
 
+    const AmplitudeEstimate amplitude = estimateAmplitude(
+        envelope,
+        sampleRate,
+        lockedEvents,
+        result.nominalBph,
+        config.liftAngleDegrees);
+    result.amplitudeAvailable = amplitude.valid;
+    result.amplitudeDegrees = amplitude.degrees;
+
     const double eventFactor =
         clamp01((lockedEvents.size() - 7.0) / 45.0);
     const double snrFactor =
-        clamp01((result.signalToNoiseDb - 6.0) / 22.0);
+        clamp01((result.signalToNoiseDb - 4.0) / 16.0);
     const double lockFactor =
         clamp01((lock.correlation - 0.025) / 0.30);
     const double periodMadMicroseconds =
@@ -782,13 +1019,12 @@ AnalysisResult TimegrapherAnalyzer::analyze(
         -std::pow(result.intervalJitterMilliseconds / 1.8, 2.0));
     result.confidence = 100.0 * clamp01(
         0.25 * best.score
-        + 0.25 * lockFactor
+        + 0.30 * lockFactor
         + 0.20 * stabilityFactor
         + 0.15 * eventFactor
-        + 0.10 * snrFactor
+        + 0.05 * snrFactor
         + 0.05 * jitterFactor);
 
-    result.amplitudeAvailable = false;
     result.valid = true;
     result.status = result.confidence >= 65.0
         ? "Misurazione stabile"
@@ -806,7 +1042,10 @@ AnalysisResult MeasurementStabilizer::process(
 
     if (m_history.empty()) {
         m_history.push_back(candidate);
-        return candidate;
+        m_smoothedConfidence = candidate.confidence;
+        m_lastOutput = candidate;
+        m_hasLastOutput = true;
+        return m_lastOutput;
     }
 
     const double referenceBph = m_history.back().nominalBph;
@@ -840,7 +1079,7 @@ AnalysisResult MeasurementStabilizer::process(
         m_pendingCandidate = candidate;
 
         if (m_pendingCount < kRequiredConfirmations)
-            return m_history.back();
+            return m_hasLastOutput ? m_lastOutput : m_history.back();
 
         m_history.clear();
         m_pendingCount = 0;
@@ -857,18 +1096,47 @@ AnalysisResult MeasurementStabilizer::process(
         medianOfResults(m_history, &AnalysisResult::rateSecondsPerDay);
     stabilized.beatErrorMilliseconds =
         medianOfResults(m_history, &AnalysisResult::beatErrorMilliseconds);
+    stabilized.signalToNoiseDb =
+        medianOfResults(m_history, &AnalysisResult::signalToNoiseDb);
+    stabilized.intervalJitterMilliseconds =
+        medianOfResults(m_history, &AnalysisResult::intervalJitterMilliseconds);
+    const double medianConfidence =
+        medianOfResults(m_history, &AnalysisResult::confidence);
+    constexpr double kConfidenceSmoothing = 0.18;
+    m_smoothedConfidence += kConfidenceSmoothing
+        * (medianConfidence - m_smoothedConfidence);
+    stabilized.confidence = m_smoothedConfidence;
+
+    std::vector<AnalysisResult> amplitudeResults;
+    for (const AnalysisResult& result : m_history) {
+        if (result.amplitudeAvailable)
+            amplitudeResults.push_back(result);
+    }
+    if (amplitudeResults.size() >= std::min<std::size_t>(3, m_history.size())) {
+        stabilized.amplitudeDegrees =
+            medianOfResults(amplitudeResults, &AnalysisResult::amplitudeDegrees);
+        stabilized.amplitudeAvailable = true;
+    } else {
+        stabilized.amplitudeDegrees = 0.0;
+        stabilized.amplitudeAvailable = false;
+    }
     if (stabilized.nominalBph > 0.0) {
         stabilized.measuredBph = stabilized.nominalBph
             * (1.0 + stabilized.rateSecondsPerDay / kSecondsPerDay);
     }
-    return stabilized;
+    m_lastOutput = stabilized;
+    m_hasLastOutput = true;
+    return m_lastOutput;
 }
 
 void MeasurementStabilizer::reset()
 {
     m_history.clear();
     m_pendingCandidate = {};
+    m_lastOutput = {};
     m_pendingCount = 0;
+    m_smoothedConfidence = 0.0;
+    m_hasLastOutput = false;
 }
 
 } // namespace chronolab

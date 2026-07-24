@@ -51,7 +51,9 @@ void testKnownRate(
     chronolab::TimegrapherAnalyzer analyzer;
     const auto result = analyzer.analyze(samples, sampleRate);
 
-    require(result.valid, "analysis should be valid: " + result.status);
+    require(result.valid,
+            "analysis should be valid at "
+                + std::to_string(bph) + " A/h: " + result.status);
     require(std::abs(result.nominalBph - bph) < 1.0,
             "wrong nominal BPH");
     require(std::abs(result.rateSecondsPerDay - expectedRate) <= rateTolerance,
@@ -62,6 +64,26 @@ void testKnownRate(
             "beat error outside tolerance: got "
                 + std::to_string(result.beatErrorMilliseconds));
     require(result.confidence >= 60.0, "confidence unexpectedly low");
+}
+
+void testKnownAmplitude()
+{
+    constexpr int sampleRate = 48000;
+    chronolab::SyntheticWatchConfig config;
+    config.sampleRate = sampleRate;
+    config.durationSeconds = 20.0;
+    config.nominalBph = 21600.0;
+    config.amplitudeDegrees = 278.0;
+    const auto samples = chronolab::SyntheticWatch::generate(config);
+    chronolab::TimegrapherAnalyzer analyzer;
+    const auto result = analyzer.analyze(samples, sampleRate);
+
+    require(result.valid, "amplitude fixture should be valid");
+    require(result.amplitudeAvailable,
+            "known three-phase impulse should produce amplitude");
+    require(std::abs(result.amplitudeDegrees - config.amplitudeDegrees) <= 25.0,
+            "amplitude outside tolerance: got "
+                + std::to_string(result.amplitudeDegrees));
 }
 
 void testSilenceRejected()
@@ -132,7 +154,10 @@ void testChangingRealWorldResonancesRemainLocked()
     }
 }
 
-chronolab::AnalysisResult measurement(double rate, double beatError = 0.5)
+chronolab::AnalysisResult measurement(
+    double rate,
+    double beatError = 0.5,
+    double confidence = 85.0)
 {
     chronolab::AnalysisResult result;
     result.valid = true;
@@ -140,7 +165,7 @@ chronolab::AnalysisResult measurement(double rate, double beatError = 0.5)
     result.measuredBph = 21600.0 * (1.0 + rate / 86400.0);
     result.rateSecondsPerDay = rate;
     result.beatErrorMilliseconds = beatError;
-    result.confidence = 85.0;
+    result.confidence = confidence;
     result.status = "Misurazione stabile";
     return result;
 }
@@ -171,6 +196,27 @@ void testPersistentRateChangeIsEventuallyAccepted()
             "a confirmed new measurement cluster was not accepted");
 }
 
+void testConfidenceDisplayDoesNotPump()
+{
+    chronolab::MeasurementStabilizer stabilizer;
+    std::vector<double> displayed;
+    displayed.push_back(
+        stabilizer.process(measurement(8.0, 0.8, 88.0)).confidence);
+    displayed.push_back(
+        stabilizer.process(measurement(8.1, 0.8, 55.0)).confidence);
+    displayed.push_back(
+        stabilizer.process(measurement(7.9, 0.8, 92.0)).confidence);
+    displayed.push_back(
+        stabilizer.process(measurement(8.2, 0.8, 50.0)).confidence);
+    displayed.push_back(
+        stabilizer.process(measurement(8.0, 0.8, 90.0)).confidence);
+
+    for (std::size_t index = 1; index < displayed.size(); ++index) {
+        require(std::abs(displayed[index] - displayed[index - 1]) < 4.0,
+                "confidence display changed too abruptly");
+    }
+}
+
 } // namespace
 
 int main()
@@ -182,11 +228,13 @@ int main()
         testKnownRate(18000.0, -12.0, 0.70, 1.8, 0.18);
         testKnownRate(14400.0, 5.0, 0.30, 2.0, 0.20);
         testKnownRate(28800.0, -3.0, 0.20, 1.6, 0.15);
+        testKnownAmplitude();
         testManualBph();
         testMissedBeats();
         testChangingRealWorldResonancesRemainLocked();
         testTransientRateOutlierIsRejected();
         testPersistentRateChangeIsEventuallyAccepted();
+        testConfidenceDisplayDoesNotPump();
         testSilenceRejected();
     } catch (const TestFailure& failure) {
         std::cerr << "FAILED: " << failure.message << '\n';

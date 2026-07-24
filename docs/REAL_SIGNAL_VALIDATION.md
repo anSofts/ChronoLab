@@ -60,3 +60,20 @@ On the same thirteen windows it produced:
 
 The desktop layer now also withholds an isolated rate/BPH jump and requires
 three mutually coherent windows before treating a large change as real.
+
+## 0.3.3 follow-up
+
+Signal-to-noise diagnostics now use the filtered escapement pulse band.
+Confidence, SNR and jitter are stabilized across overlapping windows.
+
+On the same thirteen windows:
+
+- band-limited SNR range: 13.95 to 15.14 dB;
+- raw confidence range: 87.16 to 89.29 percent;
+- displayed confidence range: 87.95 to 88.74 percent;
+- detected amplitude range: 304.5 to 307.8 degrees at a 52-degree lift angle.
+
+The earlier TG amplitude of 278 degrees came from a separate same-watch
+measurement. It is useful as an engineering reference but not sufficient to
+calibrate the amplitude detector; a closely repeated or simultaneous
+comparison is still required.

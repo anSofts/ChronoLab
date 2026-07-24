@@ -96,7 +96,7 @@ MainWindow::MainWindow(LanguageManager& languageManager, QWidget* parent)
                     m_analysisTimer->stop();
             });
     onDevicesChanged(m_capture.inputDeviceNames());
-    setWindowTitle(tr("ChronoLab 0.3.2 — Open Timegrapher"));
+    setWindowTitle(tr("ChronoLab 0.3.3 — Open Timegrapher"));
     resize(1360, 850);
     setMinimumSize(1024, 680);
     loadSettings();
@@ -359,7 +359,7 @@ void MainWindow::buildInterface()
     root->addWidget(splitter, 1);
 
     auto* footer = new QLabel(
-        tr("ChronoLab 0.3.2 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
+        tr("ChronoLab 0.3.3 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
     footer->setObjectName(QStringLiteral("footer"));
     root->addWidget(footer, 0, Qt::AlignRight);
 
@@ -609,7 +609,7 @@ void MainWindow::updateMeasurementUi(const AnalysisResult& result)
     m_amplitudeValue->setToolTip(result.amplitudeAvailable
         ? tr("Ampiezza calcolata con angolo di levata %1°")
               .arg(analyzerConfig().liftAngleDegrees)
-        : tr("In validazione: non mostriamo un valore non dimostrato"));
+        : tr("Impulsi di levata non sufficientemente distinguibili"));
     m_beatErrorValue->setText(
         QString::number(result.beatErrorMilliseconds, 'f', 2));
     m_bphValue->setText(
@@ -687,6 +687,12 @@ void MainWindow::runSimulation()
     beatError->setSuffix(tr(" ms"));
     beatError->setValue(0.40);
 
+    auto* amplitude = new QDoubleSpinBox;
+    amplitude->setRange(120.0, 380.0);
+    amplitude->setDecimals(0);
+    amplitude->setSuffix(tr("°"));
+    amplitude->setValue(280.0);
+
     auto* noise = new QDoubleSpinBox;
     noise->setRange(0.0, 0.10);
     noise->setDecimals(4);
@@ -706,6 +712,7 @@ void MainWindow::runSimulation()
     form->addRow(tr("Frequenza:"), bph);
     form->addRow(tr("Marcia:"), rate);
     form->addRow(tr("Beat error:"), beatError);
+    form->addRow(tr("Ampiezza:"), amplitude);
     form->addRow(tr("Rumore:"), noise);
     form->addRow(tr("Durata:"), duration);
     form->addRow(tr("Perdi un impulso ogni:"), dropEvery);
@@ -727,6 +734,8 @@ void MainWindow::runSimulation()
     config.nominalBph = bph->currentData().toDouble();
     config.rateSecondsPerDay = rate->value();
     config.beatErrorMilliseconds = beatError->value();
+    config.liftAngleDegrees = analyzerConfig().liftAngleDegrees;
+    config.amplitudeDegrees = amplitude->value();
     config.noiseLevel = noise->value();
     config.dropEvery = dropEvery->value();
     const std::vector<float> generated = SyntheticWatch::generate(config);
