@@ -57,7 +57,10 @@ std::vector<float> SyntheticWatch::generate(const SyntheticWatchConfig& config)
     const double measuredBph = config.nominalBph
         * (1.0 + config.rateSecondsPerDay / 86400.0);
     const double meanPeriod = 3600.0 / measuredBph;
-    const double halfBeatError = config.beatErrorMilliseconds / 2000.0;
+    // Timegrapher beat error is the displacement of either half-cycle from
+    // the ideal midpoint. The two alternating intervals therefore differ by
+    // twice the configured value.
+    const double halfBeatError = config.beatErrorMilliseconds / 1000.0;
 
     double eventTime = 0.45;
     long long beat = 0;
@@ -65,15 +68,41 @@ std::vector<float> SyntheticWatch::generate(const SyntheticWatchConfig& config)
         const bool dropped = config.dropEvery > 0
             && beat % config.dropEvery == config.dropEvery - 1;
         if (!dropped) {
+            const double variation =
+                std::clamp(config.impulseShapeVariation, 0.0, 1.0);
+            constexpr double firstPattern[] {
+                1.00, 0.42, 1.35, 0.55, 1.18, 0.70
+            };
+            constexpr double secondPattern[] {
+                0.58, 1.20, 0.48, 1.32, 0.62, 1.05
+            };
+            constexpr double thirdPattern[] {
+                0.75, 1.38, 0.52, 1.22, 0.68, 1.12
+            };
+            const std::size_t shape =
+                static_cast<std::size_t>(beat % 6);
+            const auto varied = [variation, shape](
+                                    double base,
+                                    const double* pattern) {
+                return base * ((1.0 - variation)
+                               + variation * pattern[shape]);
+            };
+
             // Three acoustic phases, intentionally not identical. They are a
             // deterministic laboratory signal, not a claim of physical
             // equivalence to a specific calibre.
             addBurst(samples, config.sampleRate, eventTime, 0.0000,
-                     config.signalLevel * 0.58, 1720.0, 760.0);
+                     config.signalLevel
+                         * varied(0.58, firstPattern),
+                     1720.0, 760.0);
             addBurst(samples, config.sampleRate, eventTime, 0.0032,
-                     config.signalLevel, 1280.0, 590.0);
+                     config.signalLevel
+                         * varied(1.00, secondPattern),
+                     1280.0, 590.0);
             addBurst(samples, config.sampleRate, eventTime, 0.0071,
-                     config.signalLevel * 0.43, 2050.0, 860.0);
+                     config.signalLevel
+                         * varied(0.43, thirdPattern),
+                     2050.0, 860.0);
         }
 
         const double interval = meanPeriod

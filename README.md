@@ -12,11 +12,12 @@ watches. It listens to an acoustic or contact sensor and estimates:
 The project is intentionally built from scratch. No source code from `tg` is
 included.
 
-> **Current status:** 0.3 engineering preview. Rate, BPH and beat-error
-> detection are implemented and tested with synthetic signals. Amplitude is
-> visible in the interface but intentionally withheld until the acoustic phase
-> detector has been validated against real recordings and a reference
-> timegrapher. ChronoLab prefers an honest ellipsis to a convincing fake number.
+> **Current status:** 0.3.1 real-signal preview. Rate, BPH and beat-error
+> detection are tested with synthetic signals and the first recording from the
+> target USB contact microphone. Amplitude is visible in the interface but
+> intentionally withheld until its acoustic phase detector has been validated
+> over multiple movements and positions. ChronoLab prefers an honest ellipsis
+> to a convincing fake number.
 
 ## Supported inputs
 
@@ -116,7 +117,7 @@ USB sensor / WAV
 Qt Multimedia capture -> normalized mono samples
         |
         v
-C++20 DSP core -> events -> BPH / rate / beat error / quality
+C++20 DSP core -> correlation lock -> BPH / rate / beat error / quality
         |
         v
 Qt Widgets UI -> strip trace / waveform / CSV / WAV
@@ -135,8 +136,10 @@ and reusable by future ESP32 or command-line frontends.
 - Package signed installers for Windows, macOS and Linux.
 
 See [docs/ALGORITHM.md](docs/ALGORITHM.md) and
-[docs/HARDWARE.md](docs/HARDWARE.md) for technical details. The exact Windows
-workflow is in [docs/BUILD_WINDOWS.md](docs/BUILD_WINDOWS.md).
+[docs/HARDWARE.md](docs/HARDWARE.md) for technical details. The first USB
+sensor comparison is documented in
+[docs/REAL_SIGNAL_VALIDATION.md](docs/REAL_SIGNAL_VALIDATION.md). The exact
+Windows workflow is in [docs/BUILD_WINDOWS.md](docs/BUILD_WINDOWS.md).
 
 ## License
 

@@ -98,6 +98,39 @@ void testMissedBeats()
             "dropouts distorted rate");
 }
 
+void testChangingRealWorldResonancesRemainLocked()
+{
+    constexpr int sampleRate = 16000;
+    chronolab::SyntheticWatchConfig config;
+    config.sampleRate = sampleRate;
+    config.durationSeconds = 30.0;
+    config.nominalBph = 21600.0;
+    config.rateSecondsPerDay = -9.0;
+    config.beatErrorMilliseconds = 0.90;
+    config.noiseLevel = 0.010;
+    config.impulseShapeVariation = 1.0;
+    config.dropEvery = 11;
+    const auto samples = chronolab::SyntheticWatch::generate(config);
+
+    chronolab::AnalyzerConfig analyzerConfig;
+    analyzerConfig.nominalBph = config.nominalBph;
+    chronolab::TimegrapherAnalyzer analyzer;
+    for (int endSecond = 18; endSecond <= 30; ++endSecond) {
+        const auto begin = samples.begin()
+            + static_cast<std::ptrdiff_t>((endSecond - 18) * sampleRate);
+        const auto end = begin + 18 * sampleRate;
+        const std::vector<float> window(begin, end);
+        const auto result =
+            analyzer.analyze(window, sampleRate, analyzerConfig);
+        require(result.valid,
+                "changing impulse resonances must keep a valid lock");
+        require(std::abs(result.rateSecondsPerDay + 9.0) < 2.0,
+                "correlation lock allowed a real-world rate spike");
+        require(std::abs(result.beatErrorMilliseconds - 0.90) < 0.25,
+                "beat error became unstable with changing resonances");
+    }
+}
+
 } // namespace
 
 int main()
@@ -111,6 +144,7 @@ int main()
         testKnownRate(28800.0, -3.0, 0.20, 1.6, 0.15);
         testManualBph();
         testMissedBeats();
+        testChangingRealWorldResonancesRemainLocked();
         testSilenceRejected();
     } catch (const TestFailure& failure) {
         std::cerr << "FAILED: " << failure.message << '\n';

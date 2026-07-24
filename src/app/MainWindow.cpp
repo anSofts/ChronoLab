@@ -96,7 +96,7 @@ MainWindow::MainWindow(LanguageManager& languageManager, QWidget* parent)
                     m_analysisTimer->stop();
             });
     onDevicesChanged(m_capture.inputDeviceNames());
-    setWindowTitle(tr("ChronoLab 0.3 — Open Timegrapher"));
+    setWindowTitle(tr("ChronoLab 0.3.1 — Open Timegrapher"));
     resize(1360, 850);
     setMinimumSize(1024, 680);
     loadSettings();
@@ -356,7 +356,7 @@ void MainWindow::buildInterface()
     root->addWidget(splitter, 1);
 
     auto* footer = new QLabel(
-        tr("ChronoLab 0.3 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
+        tr("ChronoLab 0.3.1 · GPL-3.0-or-later · Elaborazione locale, nessun dato inviato"));
     footer->setObjectName(QStringLiteral("footer"));
     root->addWidget(footer, 0, Qt::AlignRight);
 

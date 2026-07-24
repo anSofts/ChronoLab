@@ -11,7 +11,7 @@ int main(int argc, char* argv[])
     QCoreApplication::setOrganizationName(QStringLiteral("anSofts"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("ansofts.it"));
     QCoreApplication::setApplicationName(QStringLiteral("ChronoLab"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.3.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("0.3.1"));
 
     QFont font(QStringLiteral("Segoe UI"));
     font.setStyleHint(QFont::SansSerif);

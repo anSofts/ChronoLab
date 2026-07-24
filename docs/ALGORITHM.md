@@ -1,19 +1,23 @@
 # Analyzer design
 
-ChronoLab 0.3 uses a deterministic signal-processing pipeline:
+ChronoLab 0.3.1 uses a deterministic signal-processing pipeline:
 
-1. remove DC and low-frequency handling noise with a first-order high-pass;
-2. generate a short RMS envelope;
-3. estimate the noise floor with median and median absolute deviation;
-4. detect impulse clusters using an adaptive threshold and refractory window;
-5. score standard mechanical-watch beat rates against detected intervals;
-6. assign integer beat indices while tolerating missed impulses;
-7. fit time against beat index with linear regression;
-8. derive rate, alternating beat error, jitter and residual strip points;
-9. combine fit, event count, SNR and jitter into a confidence score.
+1. generate an RMS envelope and adaptive transient candidates for BPH scoring;
+2. isolate the sharp escapement content with independent second-order filters;
+3. rectify and downsample the pulse signal to a safe analysis rate;
+4. calculate long-baseline autocorrelation with an internal radix-2 FFT;
+5. follow repeated cycle peaks and robustly combine their period estimates;
+6. reject the lock when correlation or median-deviation checks fail;
+7. fold complete tick/tock cycles with a trimmed mean and estimate beat error;
+8. place strip events using constant-fraction timing and a periodic phase lock;
+9. combine BPH fit, lock strength, period stability, SNR and jitter into
+   confidence.
 
-This design avoids using only the loudest spectral peak, which can easily be a
-harmonic of the actual beat frequency.
+Rate never comes from the loudest acoustic peak. A physical contact sensor
+produces several resonances for each escapement event, and their relative
+amplitudes change from beat to beat. Long-baseline periodic correlation stays
+locked to the repeated pattern instead of allowing those resonances to move
+the timestamp.
 
 Analysis runs through Qt Concurrent in the desktop application. Audio capture
 and painting remain responsive while the platform-independent C++ core works
@@ -27,6 +31,7 @@ The built-in simulator produces repeatable:
 - positive or negative daily rate;
 - alternating intervals for known beat error;
 - three distinct damped pulse clusters per beat;
+- optionally changing dominance among those three impulse clusters;
 - white noise and low-level 50 Hz interference;
 - optional missing impulses.
 
@@ -36,10 +41,10 @@ case geometry or real escapement will behave.
 
 ## Measurement definitions
 
-- `measured_bph = 3600 / fitted_seconds_per_beat`
+- `measured_bph = 7200 / correlated_tick_tock_cycle_seconds`
 - `rate_s_per_day = (measured_bph / nominal_bph - 1) * 86400`
-- beat error is the absolute difference between the mean alternating
-  tick-to-tock and tock-to-tick intervals.
+- beat error is the displacement of the tick/tock separation from the ideal
+  half-cycle, estimated on the robust folded waveform.
 
 ## Why amplitude is not enabled yet
 

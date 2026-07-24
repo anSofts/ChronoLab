@@ -13,6 +13,7 @@ struct SyntheticWatchConfig {
     double beatErrorMilliseconds = 0.4;
     double noiseLevel = 0.004;
     double signalLevel = 0.72;
+    double impulseShapeVariation = 0.0;
     int dropEvery = 0;
     std::uint32_t randomSeed = 0xC0FFEEu;
 };

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.1 — Real Signal Lock
+
+- Replaced peak-to-peak rate calculation with a long-baseline FFT
+  autocorrelation lock.
+- Added robust cycle-period estimation with median absolute deviation checks.
+- Added constant-fraction transient timing so changing acoustic resonances no
+  longer move the detected beat.
+- Added phase locking and duplicate rejection for the time-strip trace.
+- Reworked beat-error estimation around a robust folded cycle profile.
+- Rejects unlocked windows instead of publishing physically meaningless rate
+  spikes.
+- Validated against the first 30-second recording from the target 48 kHz USB
+  contact microphone and a separate same-watch TG reference measurement.
+- Added a deterministic stress test with changing impulse shapes, higher
+  noise, and missed beats.
+
 ## 0.3.0 — MULTI5
 
 - Added complete Italian, English, French, German and Spanish interfaces.
